@@ -275,9 +275,12 @@ body.touch #hud:has(#kick-panel.show) .instruction { display: none; }
   .shot-mini { width: 150px; top: 96px; left: 8px; }
 }
 /* 터치 기기: 위쪽은 킥 패널 자리라 세로 화면은 오른쪽 중간, 가로 화면은 아래 가운데(조이스틱과 버튼 사이) */
-body.touch .shot-mini { left: auto; right: 8px; top: 316px; width: 150px; }
+body.touch .shot-mini { left: calc(8px + env(safe-area-inset-left, 0px)); right: auto; top: 88px; bottom: auto; transform: none; width: 124px; }
+body.touch .sm-card.mini { padding: 6px 7px 4px; }
+body.touch .sm-card.mini .sm-head { font-size: 11px; margin-bottom: 2px; }
+body.touch .sm-card.mini .sm-head span { font-size: 10px; }
 @media (max-height: 560px) {
-  body.touch .shot-mini { top: auto; right: auto; left: 50%; bottom: 10px; transform: translateX(-50%); width: 170px; }
+  body.touch .shot-mini { top: 64px; }
 }
 
 /* ---------------- 토너먼트 대진표 ---------------- */
@@ -342,3 +345,14 @@ body.touch .shot-mini { left: auto; right: 8px; top: 316px; width: 150px; }
   .tour-btns { order: 2; }
   .tour-bracket { order: 3; }
 }
+
+/* 터치 기기: 킥 종류·파워 게이지는 슛 버튼 바로 위에 작게 (골대를 가리지 않게) */
+body.touch #kick-panel { top: auto; left: auto; right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(154px + env(safe-area-inset-bottom, 0px));
+  margin: 0; width: 186px; max-width: calc(100vw - 24px); padding: 7px; gap: 6px; flex-direction: column; flex-wrap: nowrap; align-items: stretch;
+  border-radius: 12px; background: rgba(5, 12, 9, .72); }
+body.touch #kick-panel .choice label, body.touch #kick-panel .meter > label, body.touch #kick-panel .meter-legend { display: none; }
+body.touch #kick-panel .seg { gap: 3px; }
+body.touch #kick-panel .seg button { flex: 1; padding: 7px 2px; font-size: 11px; }
+body.touch #kick-panel .seg button b { display: none; }
+body.touch #kick-panel .meter { width: 100%; min-width: 0; }
+body.touch #kick-panel .power-bar { height: 10px; margin-top: 0; }
