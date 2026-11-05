@@ -490,9 +490,7 @@ PK.Game = (function () {
       later(0.6 + Math.random() * 0.8, () => { if (st.K) st.K.shiftTarget = shift; });
     }
     setText('role-banner', `⚽ ${t.name} 키커`);
-    setText('instruction', isTouch
-      ? '조이스틱: 조준 · 킥 종류 선택 · 슛 버튼을 누르고 있다가 떼면 슛 · 달려가는 중 멈칫 버튼'
-      : '조준: 방향키/마우스 · 킥 종류: 1 감아차기 2 인스텝 3 파넨카 · 스페이스(클릭)를 누르고 있다가 떼면 슛 · 달려가는 중 R = 멈칫');
+    setText('instruction', ''); // 조작 설명은 화면에 띄우지 않음 (로비 조작법 안내로 대신)
     $('kick-panel').classList.add('show');
     syncPanels();
     S.aim.visible = true; S.traj.visible = true;
@@ -545,8 +543,7 @@ PK.Game = (function () {
       st.K.diveWorld = null;
       st.K.diveStart = Infinity;
       setText('role-banner', `🧤 ${t.name} 골키퍼`);
-      setText('instruction', '방향키: 이동 + 다이빙 방향 · 스페이스: 다이빙 · 곧 키커가 달려옵니다');
-      $('keeper-panel').classList.add('show');
+      setText('instruction', '');
       S.traj.visible = false;
       S.aimMat.color.set('#2fd0ff');
       later(1.8, () => { $('keeper-panel').classList.remove('show'); beginRunup(); });
@@ -681,9 +678,7 @@ PK.Game = (function () {
     st.state = 'keeperReady';
     st.K.manual = true; st.K.diveWorld = null; st.K.diveStart = Infinity;
     setText('role-banner', '🧤 골키퍼 (나)');
-    setText('instruction', isTouch ? '조이스틱: 이동 + 다이빙 방향 · 다이빙 버튼 = 다이빙 · 상대가 조준하는 중'
-      : '방향키: 이동 + 다이빙 방향 · 스페이스 = 다이빙 · 상대가 조준하는 중');
-    $('keeper-panel').classList.add('show');
+    setText('instruction', '상대가 조준하는 중');
     S.traj.visible = false;
   }
   function planOpt(timing) {
@@ -823,8 +818,7 @@ PK.Game = (function () {
       st.K.manual = true;
       st.K.timing = null;
       setText('role-banner', `🧤 ${st.teams[st.keeperTeam].name} 골키퍼`);
-      setText('instruction', isTouch ? '조이스틱: 이동 + 다이빙 방향 · 다이빙 버튼을 누르는 순간 다이빙'
-        : '방향키: 이동 + 다이빙 방향 · 원하는 순간에 스페이스 = 다이빙 · 안 누르면 제자리에서 버팀');
+      setText('instruction', '');
       S.aimMat.color.set('#2fd0ff');
     } else {
       st.K.timing = timing;
@@ -834,8 +828,7 @@ PK.Game = (function () {
     }
     if (isLocal(st.kickerTeam)) {
       PK.AI.rememberKick(st.shot.target.x);
-      if (!isLocal(st.keeperTeam)) setText('instruction', isTouch ? '달려가는 중 멈칫 버튼을 누르고 있으면 멈칫' : '달려가는 중 스페이스나 R을 누르고 있으면 멈칫 (키퍼를 먼저 움직이게!)');
-      else setText('instruction', '키커: R을 누르고 있으면 멈칫 · 키퍼: 방향키 + 스페이스');
+      setText('instruction', '');
     }
     setCam(new V3(0.7, 2.3, 17.2), new V3(0, 0.1, 2), 1.2);
     PK.Audio.crowd(0.3, 0.8);
