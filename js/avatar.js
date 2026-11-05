@@ -438,8 +438,13 @@ PK.Avatar = (function () {
     // 상체: 허리→가슴→어깨로 이어지는 몸통 (유니폼 무늬/등번호 텍스처)
     const spine = new THREE.Bone(); spine.position.y = 0.07; hips.add(spine); P.spine = spine;
     // 셔츠 몸통: 허리 아래는 골반, 위는 상체를 따라감 (허리를 숙이거나 비틀면 부드럽게 휨)
-    skinTube([[0.001, 1.02], [0.163, 1.02], [0.166, 1.1], [0.176, 1.22], [0.196, 1.35], [0.207, 1.45], [0.203, 1.53], [0.176, 1.59], [0.12, 1.635], [0.062, 1.652], [0.001, 1.655]],
-      0, 0, 0.64, shirt, (y) => mix2(hips, spine, sstep(0.99, 1.12, y)), 28);
+    skinTube([[0.001, 1.02], [0.163, 1.02], [0.166, 1.1], [0.176, 1.22], [0.196, 1.35], [0.207, 1.44], [0.205, 1.5], [0.192, 1.55], [0.165, 1.59], [0.125, 1.62], [0.085, 1.642], [0.06, 1.652], [0.001, 1.655]],
+      0, 0, 0.64, shirt, (y, x) => {
+        if (y < 1.3) return mix2(hips, spine, sstep(0.99, 1.12, y));
+        // 어깨 바깥 윗부분: 팔을 들면 같이 들리도록 팔 뼈를 최대 45% 따라감 (어깨가 한 덩어리로 이어져 보이게)
+        const t = sstep(0.11, 0.2, Math.abs(x)) * sstep(1.34, 1.5, y) * 0.45;
+        return mix2(spine, x > 0 ? P.armL : P.armR, t);
+      }, 28);
     ring(0.164, 0.009, trim, spine, -0.01).scale.y = 0.64; // 셔츠 밑단
     ring(0.06, 0.013, trim, spine, 0.6).scale.y = 0.82;    // 칼라
 
@@ -468,17 +473,15 @@ PK.Avatar = (function () {
       const cx = 0.235 * s;
       // 팔 한 줄: 손목→아래팔→팔꿈치(굽힘 구간)→이두근→어깨(상체와 살짝 이어짐)
       const armW = (y) => (y < 1.38 ? mix2(elbow, arm, sstep(1.18, 1.28, y)) : mix2(arm, spine, sstep(1.5, 1.57, y) * 0.3));
-      skinTube([[0.001, 0.935], [0.033, 0.94], [0.035, 0.98], [0.044, 1.11], [0.049, 1.18], [0.047, 1.23], [0.05, 1.28], [0.056, 1.4], [0.058, 1.48], [0.052, 1.55], [0.001, 1.565]],
+      skinTube([[0.001, 0.935], [0.033, 0.94], [0.035, 0.98], [0.044, 1.11], [0.049, 1.18], [0.047, 1.23], [0.05, 1.28], [0.056, 1.4], [0.059, 1.47], [0.056, 1.53], [0.046, 1.57], [0.024, 1.59], [0.001, 1.594]],
         cx, 0, 1, keeper ? sleeve : skin, armW, 16);
       if (!keeper) {
         // 반팔 소매 + 소매 끝단
-        skinTube([[0.066, 1.355], [0.067, 1.41], [0.069, 1.48], [0.064, 1.55], [0.045, 1.585], [0.001, 1.595]], cx, 0, 1, sleeve, armW, 18);
+        skinTube([[0.067, 1.355], [0.069, 1.42], [0.071, 1.48], [0.068, 1.53], [0.058, 1.565], [0.04, 1.59], [0.015, 1.6], [0.001, 1.602]], cx, 0, 1, sleeve, armW, 18);
         ring(0.066, 0.008, trim, arm, -0.172);
       } else {
         ring(0.036, 0.008, trim, elbow, -0.27); // 긴팔 소매 끝
       }
-      // 어깨 (삼각근): 팔과 함께 돌아 어깨 관절을 덮음
-      mesh(new THREE.SphereGeometry(0.072, 16, 12), sleeve, arm, -0.035 * s, 0.01, 0).scale.set(1, 0.9, 0.95);
       const hand = new THREE.Bone(); hand.position.y = -0.3; elbow.add(hand);
       if (keeper) {
         // 골키퍼 장갑: 손목 밴드 + 손바닥 + 손가락 4개 + 엄지
@@ -543,7 +546,7 @@ PK.Avatar = (function () {
       const pos = geo.attributes.position, n = pos.count;
       const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
       for (let i = 0; i < n; i++) {
-        j.wfn(pos.getY(i)).forEach((e, q) => { si[i * 4 + q] = bones.indexOf(e[0]); sw[i * 4 + q] = e[1]; });
+        j.wfn(pos.getY(i), pos.getX(i)).forEach((e, q) => { si[i * 4 + q] = bones.indexOf(e[0]); sw[i * 4 + q] = e[1]; });
       }
       geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
       geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
