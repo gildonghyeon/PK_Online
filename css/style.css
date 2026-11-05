@@ -365,3 +365,17 @@ body.touch .joy { left: calc(24px + env(safe-area-inset-left, 0px)); bottom: cal
 body.touch .btn-action { right: calc(28px + env(safe-area-inset-right, 0px)); bottom: calc(36px + env(safe-area-inset-bottom, 0px)); }
 /* 아이폰 사파리: 두 번 탭 확대 막기 (버튼·화면 전체) */
 html, body, button { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
+
+/* 조준점 파워 링: 조준점을 둘러싸고 누르는 동안 차오름 (킥 패널의 파워 바는 숨김) */
+.aim-power { position: absolute; left: -32px; top: -32px; width: 64px; height: 64px; pointer-events: none; will-change: transform; }
+.aim-power svg { transform: rotate(-90deg); overflow: visible; }
+.aim-power circle { fill: none; stroke-width: 6; }
+.ap-track { stroke: rgba(0, 0, 0, .45); }
+/* 구간 색: 약함(파랑) · 적절(초록) · 위험(빨강) — 바탕은 흐리게, 채워지는 부분은 같은 색으로 진하게 */
+.ap-zone { stroke-width: 6; opacity: .62; }
+.ap-zone.weak { stroke: #5aa9ff; }
+.ap-zone.good { stroke: #6ee36e; }
+.ap-zone.risky { stroke: #ff4d5e; }
+.ap-fill { stroke: #6ee36e; stroke-width: 7 !important; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
+.ap-track { stroke-width: 9 !important; }
+#kick-panel .meter { display: none !important; }

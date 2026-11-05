@@ -83,18 +83,25 @@ PK.Game = (function () {
     window.addEventListener('keydown', (e) => {
       if (!st.active) return;
       st.keys[e.code] = true;
-      if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) { if (st.state === 'handoff') $('handoff-btn').click(); else pressAction(); } }
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (!e.repeat) {
+          const run = st.Kk && st.Kk.run;
+          if (st.state === 'handoff') $('handoff-btn').click();
+          // 키커가 달려가는 중: 스페이스 = 멈칫. 한 화면 멀티(멈칫 없음)와 내가 키퍼일 때는 스페이스 = 다이빙
+          else if (st.state === 'runup' && kickerHumanNow() && st.mode !== 'multi' && run && !run.kicked) startStutter(false, 'space');
+          else pressAction();
+        }
+      }
       if (st.state === 'kickerAim' && !st.charging) {
         const kt = { Digit1: 'curl', Digit2: 'instep', Digit3: 'panenka' }[e.code];
         if (kt) setKickType(kt);
       }
-      if (e.code === 'KeyR' && !e.repeat) startStutter(false, 'r');
       if (e.code.startsWith('Arrow')) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => {
       st.keys[e.code] = false;
       if (st.active && e.code === 'Space') releaseAction();
-      if (st.active && e.code === 'KeyR') endStutter('r');
     });
 
     document.querySelectorAll('#kick-types button').forEach((b) => b.addEventListener('click', () => { b.blur(); if (st.state === 'kickerAim' && !st.charging) setKickType(b.dataset.type); }));
@@ -262,7 +269,7 @@ PK.Game = (function () {
       for (let i = 0; i < 48; i++) { const a = (i / 48) * Math.PI * 2; g.beginPath(); g.arc(cx + Math.cos(a) * R * 0.86, cx + Math.sin(a) * R * 0.86, S * 0.006, 0, Math.PI * 2); g.fill(); }
       // 둘레 글자
       g.font = `900 ${Math.round(S * 0.075)}px Arial, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      const txt = back ? '★ PENALTY · 11M ★' : '★ PK CHAMPIONS ★';
+      const txt = back ? '★ PENALTY · 11M ★' : '★ PK ONLINE ★';
       for (let i = 0; i < txt.length; i++) {
         const a = -Math.PI / 2 + (i - (txt.length - 1) / 2) * 0.13;
         g.save(); g.translate(cx + Math.cos(a) * R * 0.74, cx + Math.sin(a) * R * 0.74); g.rotate(a + Math.PI / 2); g.fillText(txt[i], 0, 0); g.restore();
@@ -577,7 +584,7 @@ PK.Game = (function () {
     const on = keeperControlActive();
     const kickerAiming = st.state === 'kickerAim' && kickerHumanNow();
     const run = st.Kk && st.Kk.run;
-    const canStutter = kickerHumanNow() && run && !run.kicked && (!run.stutterUsed || run.paused);
+    const canStutter = kickerHumanNow() && st.mode !== 'multi' && run && !run.kicked && (!run.stutterUsed || run.paused);
     $('touch-ctrl').classList.toggle('show', isTouch && (on || kickerAiming));
     $('btn-action').textContent = kickerAiming ? '슛' : '다이빙';
     $('btn-stutter-touch').classList.toggle('show', !!(isTouch && canStutter && st.state === 'runup'));
@@ -613,6 +620,7 @@ PK.Game = (function () {
   function startStutter(byAI, src) {
     const run = st.Kk && st.Kk.run;
     if (!run || run.kicked || run.stutterUsed || run.paused || (!byAI && !kickerHumanNow())) return;
+    if (!byAI && st.mode === 'multi') return; // 한 화면 멀티: 멈칫 없음 (스페이스는 키퍼 다이빙)
     const tauEff = st.time - run.t0 - run.pausedTotal;
     if (tauEff < 0.15 || tauEff > run.approach * 0.93) return; // 출발 직후·디딤발 이후엔 불가
     run.paused = true; run.pauseStart = st.time; run.stutterUsed = true; run.stuttered = true; run.releaseReq = false; run.src = src || 'ai';
@@ -1504,6 +1512,25 @@ PK.Game = (function () {
     setCam(new V3(1.4, 1.5, 14.8), new V3(0, 1.0, 9), 1.5);
   }
 
+  // ---------- 조준점 파워 링 ----------
+  // 킥 파워를 조준점 둘레의 링으로 표시: 누르고 있으면 링이 시계 방향으로 차오르고, 바탕 색으로 약함·적절·위험 구간을 보여줌
+  const AP_R = 26, AP_C = 2 * Math.PI * AP_R;
+  const apV = new V3();
+  function updateAimPower(target) {
+    const box = $('aim-power');
+    if (!S.aim.visible) { if (!box.hidden) box.hidden = true; return; }
+    apV.set(target.x, target.y, 0.02).project(camera);
+    const el = renderer.domElement, w = el.clientWidth, h = el.clientHeight;
+    box.style.transform = `translate(${((apV.x + 1) / 2) * w}px, ${((1 - apV.y) / 2) * h}px)`;
+    const f = Math.min(1, st.power / 1.2);
+    const fill = $('ap-fill');
+    fill.style.strokeDashoffset = String(AP_C * (1 - f));
+    // 지금 파워가 있는 구간 색: 약함(~0.45, 느려서 막히기 쉬움) · 적절(~0.85) · 위험(오차가 커지고 1.0 넘으면 공이 뜸)
+    fill.style.stroke = st.power > 0.85 ? '#ff4d5e' : st.power >= 0.45 ? '#6ee36e' : '#5aa9ff';
+    box.classList.toggle('charging', st.charging);
+    if (box.hidden) box.hidden = false;
+  }
+
   // ---------- 매 프레임 ----------
   const raycaster = new THREE.Raycaster();
   const goalPlane = new THREE.Plane(new V3(0, 0, 1), 0);
@@ -1535,6 +1562,7 @@ PK.Game = (function () {
     if (st.state === 'kickerAim') {
       if (st.charging) st.power = Math.min(1.2, st.power + dt * 0.85);
       $('power-fill').style.width = (st.power / 1.2) * 100 + '%';
+      updateAimPower(target);
       // 예상 궤적 (오차 없는 이상적인 궤적) - 킥 종류별 색
       const pw = st.charging ? Math.min(1, Math.max(0.3, st.power)) : 0.75;
       const L = PK.Physics.solveLaunch(SPOT, target, shotSpeed(st.kickType, pw, false), autoCurve(st.kickType, target.x));
@@ -1589,6 +1617,7 @@ PK.Game = (function () {
     }
     if (online()) onlineTick();
     if (st.state === 'kickerAim') updateAim(dt);
+    else if (!$('aim-power').hidden) $('aim-power').hidden = true; // 조준이 끝나면 파워 링 숨김
     updateKickTimer();
     keeperControl(dt);
     updateShotMini();

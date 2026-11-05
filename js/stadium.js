@@ -153,7 +153,7 @@ PK.Stadium = (function () {
     // ---------- 광고판 ----------
     const adCv = document.createElement('canvas'); adCv.width = 1024; adCv.height = 64;
     const ag = adCv.getContext('2d');
-    const ads = ['PK CHAMPIONS', 'GOAL!', '11M CLUB', 'SUDDEN DEATH', 'KEEPER CUP'];
+    const ads = ['PK ONLINE', 'GOAL!', '11M CLUB', 'SUDDEN DEATH', 'KEEPER CUP'];
     for (let i = 0; i < 5; i++) {
       ag.fillStyle = ['#0d3b8c', '#c6ff3d', '#d42a2a', '#111', '#ff7a1a'][i];
       ag.fillRect(i * 205, 0, 205, 64);

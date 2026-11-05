@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
-  <title>PK 챔피언스</title>
+  <title>PK Online</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
@@ -16,7 +16,7 @@
   <section id="lobby" class="screen active">
     <div class="lobby-bg"></div>
     <div class="lobby-left">
-      <h1 class="logo">PK<span>CHAMPIONS</span></h1>
+      <h1 class="logo">PK<span>ONLINE</span></h1>
       <p class="tagline">11미터의 승부, 단 한 번의 킥</p>
 
       <div class="menu">
@@ -68,7 +68,7 @@
         <ul>
           <li><b>키커</b> 마우스/방향키로 조준 · 스페이스/클릭을 눌렀다 떼서 파워 · 10초 안에 차야 해요</li>
           <li><b>골키퍼</b> 방향키로 이동 + 다이빙 방향 · 스페이스를 누르는 순간 다이빙 (모바일: 조이스틱 + 다이빙 버튼)</li>
-          <li><b>킥 종류</b> 1 감아차기(휘어 들어감) · 2 인스텝(강함) · 3 파넨카(칩슛) · 달려가는 중 R = 멈칫</li>
+          <li><b>킥 종류</b> 1 감아차기(휘어 들어감) · 2 인스텝(강함) · 3 파넨카(칩슛) · 달려가는 중 스페이스 = 멈칫 (한 화면 멀티 제외)</li>
           <li>파워를 너무 세게 하면 공이 뜨고 정확도가 떨어집니다</li>
         </ul>
       </div>
@@ -106,6 +106,16 @@
     <div class="role-banner" id="role-banner"></div>
     <div class="instruction" id="instruction"></div>
     <div class="shot-mini" id="shot-mini" hidden></div>
+    <!-- 조준점 파워 링 (조준점 화면 위치를 따라다님) -->
+    <div class="aim-power" id="aim-power" hidden aria-hidden="true">
+      <svg viewBox="0 0 64 64" width="64" height="64">
+        <circle class="ap-track" cx="32" cy="32" r="26" />
+        <circle class="ap-zone weak" cx="32" cy="32" r="26" stroke-dasharray="59.66 163.36" stroke-dashoffset="0" />
+        <circle class="ap-zone good" cx="32" cy="32" r="26" stroke-dasharray="52.85 163.36" stroke-dashoffset="-61.26" />
+        <circle class="ap-zone risky" cx="32" cy="32" r="26" stroke-dasharray="46.05 163.36" stroke-dashoffset="-115.71" />
+        <circle class="ap-fill" id="ap-fill" cx="32" cy="32" r="26" stroke-dasharray="163.36" stroke-dashoffset="163.36" />
+      </svg>
+    </div>
     <div class="kick-timer" id="kick-timer" title="남은 시간 (0이 되면 골대 정중앙으로 자동 킥)"></div>
 
     <div class="kick-panel" id="kick-panel">
@@ -116,7 +126,6 @@
           <button data-type="instep" title="곧고 빠르게 · 오차 큼"><b>2</b> 인스텝</button>
           <button data-type="panenka" title="키퍼가 먼저 뛰면 골, 버티면 실패"><b>3</b> 파넨카</button>
         </div>
-        <div class="kick-hint">점선 = 예상 궤적 · 달려가는 중 <b>R</b>(모바일: 멈칫 버튼)을 누르고 있으면 멈칫</div>
       </div>
       <div class="meter">
         <label>파워</label>
