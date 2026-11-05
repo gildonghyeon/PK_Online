@@ -1,0 +1,10 @@
+# 로컬 개발 도구 설정 (이 PC 전용 경로가 들어 있음)
+.claude/
+
+# 운영체제·편집기 파일
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+*.log
+node_modules/

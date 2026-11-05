@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PK 챔피언스</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- 3D 게임 캔버스 -->
+  <canvas id="game-canvas"></canvas>
+
+  <!-- ================= 로비 ================= -->
+  <section id="lobby" class="screen active">
+    <div class="lobby-bg"></div>
+    <div class="lobby-left">
+      <h1 class="logo">PK<span>CHAMPIONS</span></h1>
+      <p class="tagline">11미터의 승부, 단 한 번의 킥</p>
+
+      <div class="menu">
+        <button class="menu-btn" data-mode="single">
+          <span class="menu-title">싱글 플레이</span>
+          <span class="menu-sub">AI와 승부차기 대결</span>
+        </button>
+        <div class="difficulty" id="difficulty">
+          <span>AI 난이도</span>
+          <button data-diff="easy">쉬움</button>
+          <button data-diff="normal" class="on">보통</button>
+          <button data-diff="hard">어려움</button>
+        </div>
+        <button class="menu-btn" data-mode="tournament">
+          <span class="menu-title">토너먼트</span>
+          <span class="menu-sub" id="tour-menu-sub">8팀 녹아웃 · 8강부터 우승까지</span>
+        </button>
+        <button class="menu-btn" data-mode="multi">
+          <span class="menu-title">멀티 플레이</span>
+          <span class="menu-sub">한 화면에서 친구와 번갈아 대결</span>
+        </button>
+        <button class="menu-btn" data-mode="online">
+          <span class="menu-title">온라인 대전</span>
+          <span class="menu-sub">방 코드로 다른 기기의 친구와 대결 (1P 선수로 출전)</span>
+        </button>
+        <div class="online-panel" id="online-panel" hidden>
+          <p class="op-note" id="op-loading">연결 준비 중...</p>
+          <p class="op-note" id="op-unavailable" hidden>온라인 대전은 Claude에 로그인해서 이 게임 링크를 열었을 때만 할 수 있어요. 상대도 링크를 공유받아 열어야 해요.</p>
+          <div class="op-start" id="op-start" hidden>
+            <button class="op-primary" id="op-create">방 만들기</button>
+            <span class="op-or">또는</span>
+            <label class="op-label" for="op-code">코드</label>
+            <input id="op-code" maxlength="4" placeholder="AB12" autocomplete="off" autocapitalize="characters" spellcheck="false" />
+            <button id="op-join">참가</button>
+          </div>
+          <div class="op-wait" id="op-wait" hidden>
+            <div class="op-code-big" id="op-code-big"></div>
+            <p id="op-wait-msg"></p>
+            <button id="op-cancel">취소</button>
+          </div>
+          <p class="op-status" id="op-status" aria-live="polite"></p>
+          <div class="op-rooms" id="op-rooms" hidden></div>
+          <p class="op-diag" id="op-diag"></p>
+        </div>
+      </div>
+
+      <div class="controls-help">
+        <h3>조작법</h3>
+        <ul>
+          <li><b>키커</b> 마우스/방향키로 조준 · 스페이스/클릭을 눌렀다 떼서 파워 · 10초 안에 차야 해요</li>
+          <li><b>골키퍼</b> 방향키로 이동 + 다이빙 방향 · 스페이스를 누르는 순간 다이빙 (모바일: 조이스틱 + 다이빙 버튼)</li>
+          <li><b>킥 종류</b> 1 감아차기(휘어 들어감) · 2 인스텝(강함) · 3 파넨카(칩슛) · 달려가는 중 R = 멈칫</li>
+          <li>파워를 너무 세게 하면 공이 뜨고 정확도가 떨어집니다</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="lobby-right">
+      <div class="player-tabs" id="player-tabs">
+        <button data-p="0" class="on">1P 선수</button>
+        <button data-p="1">2P 선수</button>
+      </div>
+      <div class="preview-wrap">
+        <div id="preview"></div>
+        <div class="preview-hint">드래그해서 회전</div>
+      </div>
+      <div class="custom-list" id="custom-list"></div>
+      <p class="custom-help">↑↓ 항목 선택 · ←→ 변경</p>
+    </div>
+  </section>
+
+  <!-- ================= 게임 HUD ================= -->
+  <section id="hud" class="screen">
+    <div class="scoreboard">
+      <div class="team" id="team0">
+        <div class="team-name"></div>
+        <div class="dots"></div>
+      </div>
+      <div class="score"><span id="score0">0</span><i>:</i><span id="score1">0</span></div>
+      <div class="team right" id="team1">
+        <div class="team-name"></div>
+        <div class="dots"></div>
+      </div>
+    </div>
+    <div class="round-label" id="round-label"></div>
+
+    <div class="role-banner" id="role-banner"></div>
+    <div class="instruction" id="instruction"></div>
+    <div class="shot-mini" id="shot-mini" hidden></div>
+    <div class="kick-timer" id="kick-timer" title="남은 시간 (0이 되면 골대 정중앙으로 자동 킥)"></div>
+
+    <div class="kick-panel" id="kick-panel">
+      <div class="choice">
+        <label>킥 종류</label>
+        <div class="seg" id="kick-types">
+          <button data-type="curl" title="조준한 구석으로 휘어 들어감 · 정확"><b>1</b> 감아차기</button>
+          <button data-type="instep" title="곧고 빠르게 · 오차 큼"><b>2</b> 인스텝</button>
+          <button data-type="panenka" title="키퍼가 먼저 뛰면 골, 버티면 실패"><b>3</b> 파넨카</button>
+        </div>
+        <div class="kick-hint">점선 = 예상 궤적 · 달려가는 중 <b>R</b>(모바일: 멈칫 버튼)을 누르고 있으면 멈칫</div>
+      </div>
+      <div class="meter">
+        <label>파워</label>
+        <div class="power-bar"><div class="power-fill" id="power-fill"></div><div class="power-over"></div></div>
+        <div class="meter-legend"><span>약</span><span>최적</span><span>과다</span></div>
+      </div>
+    </div>
+
+    <div class="kick-panel keeper-panel" id="keeper-panel">
+      <ul class="timing-help">
+        <li><b>방향키 ←→</b> 골라인 위에서 이동 · 누르고 있는 방향이 다이빙 방향</li>
+        <li><b>방향키 ↑↓</b> 높게 / 낮게 (좌우 없이 누르면 가운데 점프 / 낮게 버티기)</li>
+        <li><b>스페이스</b> 누르는 순간 다이빙 · 안 누르면 제자리에서 버팀</li>
+        <li><b>일찍 뛰면</b> 더 멀리 닿지만 멈칫 런업·파넨카에 속기 쉬움</li>
+      </ul>
+    </div>
+
+    <!-- 모바일: 조이스틱 = 방향키, 액션 버튼 = 스페이스(슛/다이빙), 멈칫 버튼 = R -->
+    <div class="touch-ctrl" id="touch-ctrl">
+      <div class="joy" id="joy"><div class="joy-knob" id="joy-knob"></div></div>
+      <button class="btn-action" id="btn-action">슛</button>
+    </div>
+    <button class="btn-stutter-touch" id="btn-stutter-touch">멈칫</button>
+
+    <div class="result-text" id="result-text"></div>
+    <button class="hud-btn" id="btn-quit" title="로비로">✕</button>
+  </section>
+
+  <!-- 동전 던지기 -->
+  <section id="coin" class="screen overlay">
+    <div class="coin-box">
+      <h2>동전 던지기</h2>
+      <p id="coin-msg">앞면 또는 뒷면을 선택하세요</p>
+      <div class="coin-choices" id="coin-choices">
+        <button data-side="0">앞면</button>
+        <button data-side="1">뒷면</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 화면 넘기기 (멀티) -->
+  <section id="handoff" class="screen overlay">
+    <div class="handoff-box">
+      <h2 id="handoff-title"></h2>
+      <p id="handoff-msg"></p>
+      <button id="handoff-btn">준비 완료 (스페이스)</button>
+    </div>
+  </section>
+
+  <!-- 결과 -->
+  <section id="result" class="screen overlay">
+    <div class="result-box">
+      <h2 id="result-title"></h2>
+      <div class="result-score" id="result-score"></div>
+      <div class="shot-map" id="shot-map" hidden></div>
+      <p class="result-wait" id="result-wait" hidden>방장이 다시 시작하면 바로 이어서 시작돼요</p>
+      <div class="result-btns">
+        <button id="btn-again">다시 하기</button>
+        <button id="btn-lobby">로비로</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 토너먼트 대진표 -->
+  <section id="tour" class="screen overlay">
+    <canvas id="tour-confetti" class="tour-confetti" hidden aria-hidden="true"></canvas>
+    <div class="tour-box">
+      <div class="tour-head">
+        <h2>PK 토너먼트</h2>
+        <p id="tour-sub"></p>
+      </div>
+      <div class="tour-bracket" id="tour-bracket"></div>
+      <div class="tour-next" id="tour-next"></div>
+      <div class="tour-btns">
+        <button id="tour-play" class="tour-primary">8강 시작</button>
+        <button id="tour-reset">새 토너먼트</button>
+        <button id="tour-lobby">로비로</button>
+      </div>
+    </div>
+  </section>
+
+  <div id="loading">경기장 준비 중...</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/avatar.js"></script>
+  <script src="js/stadium.js"></script>
+  <script src="js/physics.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/lobby.js"></script>
+  <script src="js/online.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/tournament.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
