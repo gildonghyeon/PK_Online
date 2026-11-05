@@ -76,6 +76,9 @@ PK.Main = (function () {
   // 길게 누르기 → 글자 선택/우클릭 메뉴가 뜨지 않게
   document.addEventListener('selectstart', (e) => { if (!(e.target.closest && e.target.closest('input'))) e.preventDefault(); });
   document.addEventListener('contextmenu', (e) => e.preventDefault());
+  // 아이폰 사파리: 두 번 탭·두 손가락으로 화면이 확대되면 조작 버튼과 점수판이 화면 밖으로 밀려남 → 확대 제스처 막기
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((t) => document.addEventListener(t, (e) => e.preventDefault(), { passive: false }));
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
 
   window.addEventListener('load', boot);
 

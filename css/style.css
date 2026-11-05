@@ -275,12 +275,12 @@ body.touch #hud:has(#kick-panel.show) .instruction { display: none; }
   .shot-mini { width: 150px; top: 96px; left: 8px; }
 }
 /* 터치 기기: 위쪽은 킥 패널 자리라 세로 화면은 오른쪽 중간, 가로 화면은 아래 가운데(조이스틱과 버튼 사이) */
-body.touch .shot-mini { left: calc(8px + env(safe-area-inset-left, 0px)); right: auto; top: 88px; bottom: auto; transform: none; width: 124px; }
+body.touch .shot-mini { left: 50%; right: auto; top: 160px; bottom: auto; transform: translateX(-50%); width: 132px; opacity: .92; }
 body.touch .sm-card.mini { padding: 6px 7px 4px; }
 body.touch .sm-card.mini .sm-head { font-size: 11px; margin-bottom: 2px; }
 body.touch .sm-card.mini .sm-head span { font-size: 10px; }
 @media (max-height: 560px) {
-  body.touch .shot-mini { top: 64px; }
+  body.touch .shot-mini { top: 12px; left: calc(8px + env(safe-area-inset-left, 0px)); transform: none; width: 118px; } /* 가로 화면: 1P 키커 아래는 골대 한가운데라 점수판 왼쪽 빈자리로 */
 }
 
 /* ---------------- 토너먼트 대진표 ---------------- */
@@ -346,13 +346,22 @@ body.touch .sm-card.mini .sm-head span { font-size: 10px; }
   .tour-bracket { order: 3; }
 }
 
-/* 터치 기기: 킥 종류·파워 게이지는 슛 버튼 바로 위에 작게 (골대를 가리지 않게) */
-body.touch #kick-panel { top: auto; left: auto; right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(154px + env(safe-area-inset-bottom, 0px));
-  margin: 0; width: 186px; max-width: calc(100vw - 24px); padding: 7px; gap: 6px; flex-direction: column; flex-wrap: nowrap; align-items: stretch;
-  border-radius: 12px; background: rgba(5, 12, 9, .72); }
+/* 터치 기기: 킥 종류는 왼쪽 조이스틱 위, 파워 게이지는 오른쪽 슛 버튼 위로 나눔 (골대를 가리지 않게) */
+body.touch #kick-panel { top: 0; left: 0; right: 0; bottom: 0; margin: 0; width: auto; max-width: none; padding: 0; gap: 0;
+  background: none; border: 0; border-radius: 0; pointer-events: none; }
+body.touch #kick-panel .choice { position: absolute; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(176px + env(safe-area-inset-bottom, 0px));
+  width: 176px; padding: 6px; border-radius: 12px; background: rgba(5, 12, 9, .72); border: 1px solid var(--line); pointer-events: auto; }
+body.touch #kick-panel .meter { position: absolute; right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(158px + env(safe-area-inset-bottom, 0px));
+  width: 128px; min-width: 0; padding: 6px 7px; border-radius: 10px; background: rgba(5, 12, 9, .72); border: 1px solid var(--line); }
 body.touch #kick-panel .choice label, body.touch #kick-panel .meter > label, body.touch #kick-panel .meter-legend { display: none; }
 body.touch #kick-panel .seg { gap: 3px; }
 body.touch #kick-panel .seg button { flex: 1; padding: 7px 2px; font-size: 11px; }
 body.touch #kick-panel .seg button b { display: none; }
-body.touch #kick-panel .meter { width: 100%; min-width: 0; }
 body.touch #kick-panel .power-bar { height: 10px; margin-top: 0; }
+/* 터치 기기: 멈칫 버튼은 슛 버튼 자리에 (킥 동작 중엔 슛 버튼이 사라지므로). 키퍼 다이빙 버튼이 함께 보일 때(한 화면 멀티)만 왼쪽 중간 */
+body.touch .btn-stutter-touch { left: auto; top: auto; right: calc(28px + env(safe-area-inset-right, 0px)); bottom: calc(36px + env(safe-area-inset-bottom, 0px)); width: 110px; height: 110px; font-size: 19px; }
+body.touch .btn-stutter-touch.alt { right: auto; bottom: auto; left: calc(20px + env(safe-area-inset-left, 0px)); top: 42%; width: 96px; height: 96px; }
+body.touch .joy { left: calc(24px + env(safe-area-inset-left, 0px)); bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+body.touch .btn-action { right: calc(28px + env(safe-area-inset-right, 0px)); bottom: calc(36px + env(safe-area-inset-bottom, 0px)); }
+/* 아이폰 사파리: 두 번 탭 확대 막기 (버튼·화면 전체) */
+html, body, button { touch-action: manipulation; -webkit-text-size-adjust: 100%; }

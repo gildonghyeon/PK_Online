@@ -584,6 +584,7 @@ PK.Game = (function () {
     $('touch-ctrl').classList.toggle('show', isTouch && (on || kickerAiming));
     $('btn-action').textContent = kickerAiming ? '슛' : '다이빙';
     $('btn-stutter-touch').classList.toggle('show', !!(isTouch && canStutter && st.state === 'runup'));
+    $('btn-stutter-touch').classList.toggle('alt', !!(isTouch && (on || kickerAiming))); // 다이빙 버튼과 겹치면 왼쪽 중간으로
     if (!on) return;
     const a = keeperAxis();
     const K = st.K;
