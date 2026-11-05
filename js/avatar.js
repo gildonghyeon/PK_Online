@@ -387,6 +387,7 @@ PK.Avatar = (function () {
   // 관절(그룹) 위치와 길이는 그대로 유지: 포즈와 키퍼 판정 범위가 이 위치를 씀
   function create(cfg, opts) {
     opts = opts || {};
+    if (PK.PlayerModel && PK.PlayerModel.ready) return createWithModel(cfg, opts);
     const O = PK.Options;
     const keeper = !!opts.keeper;
     const uni = O.uniform[cfg.uniform];
@@ -583,12 +584,38 @@ PK.Avatar = (function () {
     });
   }
 
+  // 사실적인 모델: 관절(움직임·키퍼 판정 기준)은 기존과 같은 위치로 만들고, 모델이 그 자세를 따라함
+  function createWithModel(cfg, opts) {
+    const root = new THREE.Group();
+    const P = {};
+    const mk = (parent, name, x, y, z) => { const b = new THREE.Object3D(); b.position.set(x, y, z); b.userData.rigPart = true; parent.add(b); P[name] = b; return b; };
+    const hips = mk(root, 'hips', 0, 0.97, 0);
+    const spine = mk(hips, 'spine', 0, 0.07, 0);
+    mk(spine, 'head', 0, 0.74, 0);
+    ['L', 'R'].forEach((s) => {
+      const k = s === 'L' ? 1 : -1;
+      const arm = mk(spine, 'arm' + s, 0.235 * k, 0.49, 0);
+      const elbow = mk(arm, 'elbow' + s, 0, -0.3, 0);
+      mk(elbow, 'hand' + s, 0, -0.3, 0);
+      const leg = mk(hips, 'leg' + s, 0.095 * k, -0.08, 0);
+      const knee = mk(leg, 'knee' + s, 0, -0.43, 0);
+      mk(knee, 'foot' + s, 0, -0.41, 0);
+    });
+    root.userData.parts = P;
+    root.userData.keeper = !!opts.keeper;
+    PK.PlayerModel.attach(root, cfg, opts);
+    resetPose(root);
+    if (root.userData.sync) root.userData.sync();
+    return root;
+  }
+
   function dispose(obj) {
     obj.traverse((o) => {
-      if (o.geometry) o.geometry.dispose();
+      // 모델 지오메트리·기본 텍스처는 모든 선수가 함께 쓰므로 지우지 않음
+      if (o.geometry && !o.userData.sharedGeo) o.geometry.dispose();
       if (o.material) {
         const ms = Array.isArray(o.material) ? o.material : [o.material];
-        ms.forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
+        ms.forEach((m) => { if (m.map && !o.userData.sharedGeo) m.map.dispose(); m.dispose(); });
       }
     });
   }
@@ -601,5 +628,5 @@ PK.Avatar = (function () {
     return { hair: r(O.hair.length), hairColor: r(5), skin: r(O.skin.length), face: r(O.face.length), uniform: u, boots: r(O.boots.length) };
   }
 
-  return { create, resetPose, dispose, randomConfig, shade };
+  return { create, resetPose, dispose, randomConfig, shade, shirtTexture, buildHair };
 })();

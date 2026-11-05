@@ -1,0 +1,9 @@
+player.glb, hair.glb
+
+출처: Quaternius "Universal Base Characters" (Standard 무료 버전)
+https://quaternius.com/packs/universalbasecharacters.html
+라이선스: CC0 1.0 Universal (퍼블릭 도메인) — https://creativecommons.org/publicdomain/zero/1.0/
+모델 제작: Quaternius
+
+게임용으로 텍스처를 1024px WebP로 줄이고 파일을 하나로 합침 (glTF-Transform).
+hair.glb 에는 Hair_Buzzed, Hair_SimpleParted, Hair_Long, Hair_Buns, Hair_Beard 를 합쳐 둠.

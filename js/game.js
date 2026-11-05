@@ -1624,6 +1624,8 @@ PK.Game = (function () {
 
     if (st.Kk) kickerUpdate();
     if (st.K) keeperUpdate();
+    // 사실적인 선수 모델: 관절 자세를 모델 뼈에 옮김 (보이는 선수만)
+    if (st.avatars) st.avatars.forEach((a) => { [a.kicker, a.keeper].forEach((m) => { if (m.visible && m.userData.sync) m.userData.sync(); }); });
     if (st.state === 'flight' || (st.flight && st.state === 'result')) flightUpdate(dt);
 
     S.net.update(dt);

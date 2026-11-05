@@ -5,6 +5,14 @@ PK.Main = (function () {
   let renderer, scene, camera, stadium, last = performance.now();
 
   function boot() {
+    const ld = document.getElementById('loading');
+    if (window.THREE && PK.PlayerModel) {
+      if (ld) ld.textContent = '선수 불러오는 중...';
+      const timeout = new Promise((res) => setTimeout(res, 15000));
+      Promise.race([PK.PlayerModel.load().catch((e) => console.warn('선수 모델을 불러오지 못해 기본 모델로 진행', e)), timeout]).then(start);
+    } else start();
+  }
+  function start() {
     if (!window.THREE) {
       document.getElementById('loading').textContent = '3D 엔진(three.js)을 불러오지 못했습니다. 인터넷 연결을 확인하세요.';
       return;

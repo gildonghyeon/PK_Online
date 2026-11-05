@@ -126,6 +126,7 @@ PK.Lobby = (function () {
       P.armR.rotation.z = -0.14 - Math.sin(t * 2.2) * 0.03;
       P.head.rotation.y = Math.sin(t * 0.7) * 0.15;
     }
+    if (avatar && avatar.userData.sync) avatar.userData.sync();
     renderer.render(scene, camera);
   }
 
