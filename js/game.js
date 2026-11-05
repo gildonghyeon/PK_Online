@@ -947,10 +947,14 @@ PK.Game = (function () {
       K.stepping = Math.abs(goal - x) > 0.01;
     }
     // 다이빙을 안 누르면 공이 거의 도착했을 때 제자리 버티기로 확정 (느린 파넨카도 끝까지 보고 뛸 수 있게)
-    if (K.manual && !K.diveWorld && st.flight && (st.flight.decided || (st.ball && st.ball.p.z < KEEPER_Z + 0.8))) {
+    // 버틴 키퍼는 공을 끝까지 지켜봤으므로, 도착 약 0.3초 전부터 공 높이로 손을 올리고(높으면 점프) 막음
+    const arriveIn = st.ball && st.ball.v.z < -0.5 ? (st.ball.p.z - KEEPER_Z) / -st.ball.v.z : Infinity;
+    if (K.manual && !K.diveWorld && st.flight && (st.flight.decided || arriveIn < 0.3 || (st.ball && st.ball.p.z < KEEPER_Z + 0.8))) {
       K.timing = null;
-      K.diveWorld = new V3(K.av.position.x, 1.0, 0); // 가운데 버티기 → 공을 보고 손만 반응
-      K.diveStart = st.flight.t0;
+      const ty = st.shot ? clamp(st.shot.target.y, 0.3, 2.3) : 1.0;
+      K.diveWorld = new V3(K.av.position.x, ty, 0); // 가운데 버티기 → 공이 오는 높이로
+      K.diveStart = st.time - 0.26; // 이미 공을 보고 있으니 반응 지연 없이
+      if (st.shot) K.re = { x: clamp(st.shot.target.x - K.av.position.x, -0.7, 0.7), y: ty, rz: 0 };
       S.aim.visible = false;
       setText('instruction', '');
     }
@@ -1044,7 +1048,11 @@ PK.Game = (function () {
       P.hips.position.set(lerp(hx0, d.H.x, e) + shift * 0.6, lerp(0.89, d.H.y, e) + (d.jump ? Math.sin(f * Math.PI) * 0.1 : 0), 0);
       P.hips.rotation.z = d.theta * e - clamp(K.re.x - P.hips.position.x, -0.6, 0.6) * 0.35;
       if (d.jump) {
-        P.armL.rotation.z = lerp(0.55, Math.PI + 0.1, er); P.armR.rotation.z = -lerp(0.55, Math.PI + 0.1, er);
+        // 머리 위로 뻗되 두 손을 공 쪽으로 모음 (손 사이로 공이 빠지지 않게)
+        const rx = K.re.x - P.hips.position.x, L = 0.62;
+        const aL = Math.PI - Math.asin(clamp((rx + 0.07 - 0.235) / L, -1, 1));
+        const aR = Math.PI - Math.asin(clamp((-(rx - 0.07) - 0.235) / L, -1, 1));
+        P.armL.rotation.set(0, 0, lerp(0.55, aL, er)); P.armR.rotation.set(0, 0, -lerp(0.55, aR, er));
       } else {
         // 공이 올 높이로 두 손을 몸 앞에 모아 막기
         const shoulderY = P.hips.position.y + 0.5;
