@@ -2,7 +2,8 @@
 window.PK = window.PK || {};
 
 // 골키퍼 다이빙 밸런스: 최대 다이빙 거리(m), 다이빙 시간 계수, 날아가며 더 뻗을 수 있는 거리(m)
-PK.Tune = { maxT: 2.05, diveTime: 0.3, stretch: 0.15, maxShift: 0.6, lateDelay: 0.08, lateReach: 1.0, lateTime: 1.0, earlyLead: 0.14, earlyReach: 1.1 };
+PK.Tune = { maxT: 2.05, diveTime: 0.3, stretch: 0.15, maxShift: 0.6, lateDelay: 0.08, lateReach: 1.0, lateTime: 1.0, earlyLead: 0.14, earlyReach: 1.1,
+  clipDiveT: 0.85, clipDiveEase: 1.6, clipGloveR: 0.115 }; // 실제 다이빙 동작: 다 뻗는 시간(계획 시간 대비), 처음 가속 정도, 장갑 판정 반지름
 
 PK.Game = (function () {
   const V3 = THREE.Vector3;
@@ -27,6 +28,47 @@ PK.Game = (function () {
   // 보폭 위상: 런업 끝에서 오른발이 뒤로 감기기 시작하는 순간이 되도록
   const RUN_W = 11, RUN_PH_END = Math.PI / 2 - 0.6;
   const KEEPER_Z = 0.3;
+  // 실제 페널티킥 동작(Mixamo): 몸 이동 경로를 따라 선수를 옮기고, 공을 차는 순간 오른발이 공에 닿도록 출발 위치를 정함
+  //  감아차기·파넨카 = 발 안쪽으로 밀어차기(PenaltyKick) / 인스텝 = 조깅 한 걸음 뒤 다리를 크게 휘둘러 차기(InstepKick)
+  const clipMeta = (n) => (PK.PlayerModel && PK.PlayerModel.meta ? PK.PlayerModel.meta(n) : null);
+  const useKickClip = (av) => !!(clipMeta('PenaltyKick') && av && av.userData.anim);
+  const rotXZ = (x, z, y) => [x * Math.cos(y) + z * Math.sin(y), -x * Math.sin(y) + z * Math.cos(y)];
+  // 동작 시간 ct 에서 선수 위치(x, z): 공을 차는 순간 발이 공(SPOT)에 닿도록
+  function clipRootAt(def, ct) {
+    const p = PK.PlayerModel.pathAt(def.clip, ct), r = rotXZ(p[0] - def.m.ball[0], p[1] - def.m.ball[1], def.yaw);
+    return [SPOT.x + r[0], SPOT.z + r[1]];
+  }
+  let KDEF = null;
+  function kickDefs() {
+    if (KDEF) return KDEF;
+    const pm = clipMeta('PenaltyKick'); if (!pm) return null;
+    const push = { clip: 'PenaltyKick', m: pm, yaw: Math.PI + 0.1, pre: 0 };
+    push.start = clipRootAt(push, 0);
+    KDEF = { push, swing: null };
+    const im = clipMeta('InstepKick');
+    if (im) {
+      // 출발 자리를 밀어차기와 같게: 그 자리에서 공 쪽으로 곧게 조깅해 들어가 차도록 방향과 조깅 거리를 정함
+      const Vx = SPOT.x - push.start[0], Vz = SPOT.z - push.start[1], d = Math.hypot(Vx, Vz);
+      const bx = im.ball[0], bz = im.ball[1];
+      const L = Math.max(0.3, Math.sqrt(Math.max(0, d * d - bx * bx)) - bz);
+      const yaw = Math.atan2(Vx, Vz) - Math.atan2(bx, bz + L);
+      const p2 = PK.PlayerModel.pathAt('InstepKick', 0.2), v = Math.max(1.5, p2[1] / 0.2); // 동작 시작 속도로 조깅
+      KDEF.swing = { clip: 'InstepKick', m: im, yaw, pre: L / v, v, preClip: 'Jog_Fwd_Loop' };
+    }
+    return KDEF;
+  }
+  const kickDefFor = (type) => { const K = kickDefs(); return type === 'instep' && K.swing ? K.swing : K.push; };
+  // 런업 시작 후 시간 tau 에서 선수 위치를 정하고 재생할 동작을 돌려줌
+  function kickClipPose(def, tau, pos) {
+    if (tau < def.pre) {
+      const s = clipRootAt(def, 0), back = rotXZ(0, -def.v * (def.pre - tau), def.yaw);
+      pos.set(s[0] + back[0], 0, s[1] + back[1]);
+      return [def.preClip, { fade: 0.2 }];
+    }
+    const ct = Math.min(tau - def.pre, def.m.duration - 0.001), r = clipRootAt(def, ct);
+    pos.set(r[0], 0, r[1]);
+    return [def.clip, { fade: def.pre ? 0.15 : 0.25, phase: ct / def.m.duration }];
+  }
 
   let renderer, scene, camera, S; // S = 경기장 오브젝트
   let isTouch = false;
@@ -439,8 +481,14 @@ PK.Game = (function () {
     PK.Avatar.resetPose(kicker); PK.Avatar.resetPose(keeper);
     kicker.position.copy(RUN_START);
     kicker.rotation.set(0, Math.atan2(PLANT.x - RUN_START.x, PLANT.z - RUN_START.z), 0);
+    if (useKickClip(kicker)) { const k0 = kickDefs().push; kicker.position.set(k0.start[0], 0, k0.start[1]); kicker.rotation.set(0, k0.yaw, 0); } // 실제 킥 동작의 출발 자리
     keeper.position.set(0, 0, KEEPER_Z);
     keeper.rotation.set(0, 0, 0);
+    keeper.scale.set(1, 1, 1); // 반대쪽 다이빙 동작에서 뒤집었던 것 되돌림 (기울인 것도)
+    keeper.userData.postAnim = null;
+    // 새 라운드는 곧바로 대기 자세로 (지난 라운드의 누운 자세에서 서서히 바뀌며 이상하게 일어나지 않게)
+    if (keeper.userData.anim) keeper.userData.anim('GkIdle', { fade: 0 });
+    if (kicker.userData.anim) kicker.userData.anim('Idle_Loop', { fade: 0 });
     st.K = { av: keeper, dive: null, diveStart: Infinity, prev: null, celebrate: null };
     st.Kk = { av: kicker, run: null, react: null };
 
@@ -577,7 +625,9 @@ PK.Game = (function () {
   }
   function keeperControlActive() {
     const K = st.K;
-    return !!(K && K.manual && !K.diveWorld && (st.state === 'keeperReady' || st.state === 'runup' || st.state === 'flight'));
+    // 자동 버티기 반응 중이어도 공이 키퍼에게 닿기 전까지는 다이빙 가능 (킥 이후에도 뛸 수 있게)
+    const ballComing = !st.flight || (!st.flight.decided && !st.flight.events.keeper && st.ball && st.ball.p.z > KEEPER_Z + 0.3);
+    return !!(K && K.manual && (!K.diveWorld || (K.autoStay && ballComing)) && (st.state === 'keeperReady' || st.state === 'runup' || st.state === 'flight'));
   }
   // 매 프레임: 다이빙 전에는 방향키 좌우로 골라인 위를 이동, 조준점에 다이빙 방향 미리보기
   function keeperControl(dt) {
@@ -602,7 +652,13 @@ PK.Game = (function () {
     const contact = st.flight ? st.flight.t0 : K.expectedContact;
     const dt = st.time - contact; // 음수 = 킥 전
     // 킥보다 확실히 먼저 뛰면 체중을 미리 실어 더 멀리, 킥 후 반응이면 보통
-    K.timing = dt < -0.1 ? 'early' : 'normal';
+    // 킥보다 먼저 = 일찍, 킥 직후 = 보통, 공이 날아가는 걸 보고 = 늦게 (공 쪽으로 정확히 가지만 출발이 늦음)
+    K.timing = dt < -0.1 ? 'early' : dt > 0.05 && st.flight ? 'late' : 'normal';
+    if (K.autoStay) {
+      // 자동 버티기 반응을 취소하고 새로 다이빙 계획 (지금 자세에서 출발)
+      K.autoStay = false; K.dive = null; K.clipDive = undefined; K.re = null; K.lastT = undefined;
+      K.hipStartX = K.last ? K.last.hx : 0;
+    }
     K.diveWorld = keeperDiveTarget(keeperAxis());
     K.diveStart = st.time;
     S.aim.visible = false;
@@ -720,7 +776,7 @@ PK.Game = (function () {
         const q = (v) => Math.round(v * 50) / 50; // 0.02 단위 (바뀔 때만 다시 보내짐)
         const dived = K.diveWorld && isFinite(K.diveStart) && run;
         net.set({ live: { gid: st.gid, n, kx: q(K.av.position.x),
-          dv: K.diveWorld ? [r3(K.diveWorld.x), r3(K.diveWorld.y)] : null, dt: K.timing || null,
+          dv: K.diveWorld ? [r3(K.diveWorld.x), r3(K.diveWorld.y)] : null, dt: K.timing || null, as: K.autoStay ? 1 : 0,
           dts: dived ? r3(K.diveStart - run.t0) : null, drx: K.diveRootX !== undefined ? r3(K.diveRootX) : null,
           re: K.re && K.dive ? [q(K.re.x), q(K.re.y), q(K.re.rz), q(K.re.hx || 0), q(K.re.hy || 0)] : null } });
       }
@@ -740,7 +796,10 @@ PK.Game = (function () {
     const K = st.K;
     const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
     if (!K.diveWorld) { K.shiftTarget = clamp(num(L.kx), -1, 1); }
+    // 상대 키퍼가 자동 버티기 반응 중에 직접 다이빙으로 바꾸면 다시 받아서 다이빙으로
+    if (Array.isArray(L.dv) && K.diveWorld && K.autoStay && !L.as) { K.diveWorld = null; K.dive = null; K.clipDive = undefined; K.re = null; K.lastT = undefined; }
     if (Array.isArray(L.dv) && !K.diveWorld && typeof L.dts === 'number' && st.Kk.run) {
+      K.autoStay = !!L.as;
       K.diveWorld = new V3(num(L.dv[0]), num(L.dv[1]), 0);
       K.timing = ['early', 'late'].includes(L.dt) ? L.dt : null;
       // 두 기기의 런업 시계는 거의 같은 시점을 가리킴 (슛이 도착하는 지연만큼 키퍼 쪽이 늦게 시작)
@@ -777,8 +836,9 @@ PK.Game = (function () {
   //  오른쪽 구석: 골대 바깥쪽으로 출발했다가 안쪽으로 감겨 들어옴 (덜 휨)
   function autoCurve(type, aimX) {
     if (type !== 'curl') return 0;
+    // 11m 에서 눈에 보이게 휘도록 (가운데에서 40~50cm 바깥으로 볼록하게)
     const t = Math.min(1, Math.abs(aimX) / 3);
-    return aimX < 0 ? -(0.5 + 0.3 * t) : -(0.4 + 0.1 * t);
+    return aimX < 0 ? -(1.3 + 0.7 * t) : -(1.0 + 0.35 * t);
   }
   function shotSpeed(type, pw, stutter) {
     return KICK_TYPES[type].speed(pw) * (stutter && type !== 'panenka' ? 0.87 : 1);
@@ -792,7 +852,7 @@ PK.Game = (function () {
     const over = Math.max(0, power - 1);
     const curve = autoCurve(type, aim.x);
     const speed = shotSpeed(type, pw, stutter) + over * 4;
-    let sigma = (baseSigma + 0.55 * Math.pow(pw, 4)) * K.sigmaMul + 0.1 * Math.abs(curve) + over * 1.4;
+    let sigma = (baseSigma + 0.55 * Math.pow(pw, 4)) * K.sigmaMul + 0.04 * Math.abs(curve) + over * 1.4; // 커브가 커진 만큼 오차 계수는 낮춤 (정확도는 그대로)
     if (stutter) sigma += 0.1; // 멈칫하면 리듬이 깨져 정확도가 떨어짐
     const lift = type === 'panenka' ? over * 3 : over * 6.5;
     const target = new V3(aim.x + gauss() * sigma, aim.y + gauss() * sigma * 0.8 + lift, 0);
@@ -806,8 +866,9 @@ PK.Game = (function () {
     st.state = 'runup';
     setText('role-banner', ''); setText('instruction', '');
     S.aim.visible = false; S.traj.visible = false;
-    const T_APPROACH = 1.25;
-    st.Kk.run = { t0: st.time, approach: T_APPROACH, contact: T_APPROACH + 0.2, kicked: false,
+    const clipKick = useKickClip(st.Kk.av) ? kickDefFor(st.shot && st.shot.type) : null;
+    const T_APPROACH = clipKick ? clipKick.pre + clipKick.m.contact - 0.2 : 1.25; // 실제 킥 동작: 공에 닿는 시점이 동작에 정해져 있음
+    st.Kk.run = { t0: st.time, approach: T_APPROACH, contact: T_APPROACH + 0.2, kicked: false, clip: clipKick, yaw0: st.Kk.av.rotation.y,
       paused: false, pausedTotal: 0, stutterUsed: false, stuttered: false,
       ai: st.aiStutter ? { at: T_APPROACH * (0.55 + Math.random() * 0.3), dur: 0.35 + Math.random() * 0.4 } : null };
     const stutter = 0;
@@ -903,7 +964,8 @@ PK.Game = (function () {
     theta = clamp(theta, -1.78, 1.78);
     const T = (0.36 + PK.Tune.diveTime * (travel / 1.72)) * opt.time; // 멀리 날수록 시간이 더 걸림
     // slack: 남은 다이빙 여유 거리 → 날아가는 중 공 쪽으로 더 뻗을 수 있는 양 (미리 옆으로 서 있을수록 큼)
-    return { mode: 'dive', H, theta, T, D, side: Math.sign(D.x), slack: MAX_T - travel };
+    // maxReach: 엉덩이 시작점에서 손끝까지 닿을 수 있는 최대 거리 (실제 다이빙 동작도 같은 한계)
+    return { mode: 'dive', H, theta, T, D, side: Math.sign(D.x), slack: MAX_T - travel, maxReach: REACH + MAX_T };
   }
 
   // ---------- 자세 전환 블렌딩 ----------
@@ -949,11 +1011,14 @@ PK.Game = (function () {
     // 다이빙을 안 누르면 공이 거의 도착했을 때 제자리 버티기로 확정 (느린 파넨카도 끝까지 보고 뛸 수 있게)
     // 버틴 키퍼는 공을 끝까지 지켜봤으므로, 도착 약 0.3초 전부터 공 높이로 손을 올리고(높으면 점프) 막음
     const arriveIn = st.ball && st.ball.v.z < -0.5 ? (st.ball.p.z - KEEPER_Z) / -st.ball.v.z : Infinity;
-    if (K.manual && !K.diveWorld && st.flight && (st.flight.decided || arriveIn < 0.3 || (st.ball && st.ball.p.z < KEEPER_Z + 0.8))) {
+    // 킥 직후에는 살아 있는 대기 자세 그대로 (언제든 다이빙 가능), 공이 거의 왔을 때(0.25초 전)만 자동으로 손을 뻗음
+    if (K.manual && !K.diveWorld && st.flight && (st.flight.decided || arriveIn < 0.25 || (st.ball && st.ball.p.z < KEEPER_Z + 0.8))) {
       K.timing = null;
+      K.autoStay = true; // 직접 다이빙을 누르면 이 반응을 취소하고 다이빙
       const ty = st.shot ? clamp(st.shot.target.y, 0.3, 2.3) : 1.0;
       K.diveWorld = new V3(K.av.position.x, ty, 0); // 가운데 버티기 → 공이 오는 높이로
-      K.diveStart = st.time - 0.26; // 이미 공을 보고 있으니 반응 지연 없이
+      // 도착 약 0.45초 전부터 손을 올리기 시작 (처음부터 부드럽게, 손이 갈 곳은 아래에서 미리 정해 둠)
+      K.diveStart = st.time;
       if (st.shot) K.re = { x: clamp(st.shot.target.x - K.av.position.x, -0.7, 0.7), y: ty, rz: 0 };
       S.aim.visible = false;
       setText('instruction', '');
@@ -961,19 +1026,114 @@ PK.Game = (function () {
     if (st.time >= K.diveStart && K.diveWorld && !K.dive) {
       if (K.timing === 'late' && st.shot) {
         // 공을 보고 뛰므로 실제 슛 쪽으로 크게 보정 (완벽하지는 않음)
-        const tg = st.shot.target;
-        K.diveWorld.set(tg.x + gauss() * 0.3, clamp(tg.y + gauss() * 0.25, 0.2, 2.3), 0);
+        // 사람 키퍼는 고른 방향이 공과 같은 쪽일 때만 (반대쪽을 골랐으면 고른 대로)
+        const tg = st.shot.target, rx = K.av.position.x;
+        const sameSide = !K.manual || Math.sign(tg.x - rx) === Math.sign(K.diveWorld.x - rx) || Math.abs(K.diveWorld.x - rx) < 0.3;
+        if (sameSide) K.diveWorld.set(tg.x + gauss() * 0.3, clamp(tg.y + gauss() * 0.25, 0.2, 2.3), 0);
       }
       // 늦게 뛰는 키퍼는 체중을 미리 싣지 못해 조금 느리고 덜 뻗음
       K.diveRootX = K.av.position.x;
       K.dive = planDive(K.diveWorld, K.av.position.x, K.timing === 'late' ? { reach: PK.Tune.lateReach, time: PK.Tune.lateTime }
         : K.timing === 'early' ? { reach: PK.Tune.earlyReach, time: 1 } : null); // 일찍 = 미리 체중을 실어 더 멀리
+      if (K.autoStay && K.dive.mode === 'center') K.dive.T *= 0.6; // 자동 반응은 공이 거의 왔을 때라 손을 빠르게
       K.stepping = false;
     }
+    // 옆으로 날아가는 다이빙은 실제 골키퍼 다이빙 동작으로 (가운데 버티기·점프는 기존 동작)
+    if (K.dive && K.clipDive === undefined) K.clipDive = K.dive.mode === 'dive' ? setupClipDive(K) : null;
     keeperPose();
+    const ku = K.av.userData;
+    if (ku.anim) {
+      const cel = K.celebrate && st.time >= K.celebrate.t0 + 0.3;
+      const ready = !K.dive || st.time < K.diveStart; // 다이빙 전: 실제 골키퍼 준비 자세 (옆으로 이동 중엔 기존 스텝 동작)
+      // 버티기·제자리 점프 후 공 판정이 끝나면 다시 편한 대기 자세로 (손을 뻗은 채 굳어 있지 않게)
+      const settled = K.dive && K.dive.mode === 'center' && st.flight && st.flight.resolved && st.time - K.diveStart > K.dive.T + 0.5;
+      if (cel) ku.anim('Yes', { fade: 0.7 });
+      else if ((ready && !K.stepping) || settled) ku.anim('GkIdle', { fade: settled ? 0.5 : 0.3 });
+      else if (K.clipDive && !ready) ku.anim(K.clipDive.name, { fade: 0.12, phase: clipDiveUpdate(K) });
+      else ku.anim(null, { fade: ready ? 0.25 : 0.15 });
+      if (cel || settled || !K.clipDive || ready) ku.postAnim = null; // 두 손 모으기는 다이빙 중에만
+    }
     if (!(K.celebrate && st.time >= K.celebrate.t0)) {
       K.last = { hx: P.hips.position.x, hy: P.hips.position.y, rz: P.hips.rotation.z };
     }
+  }
+
+  // ---------- 실제 골키퍼 다이빙 동작 (Mixamo) ----------
+  //  side: 동작이 날아가는 쪽(모델 x 부호), t0: 몸을 날리기 시작, ts: 가장 길게 뻗은 순간, tl: 땅에 닿음
+  //  lead: ts 에서 두 손 가운데 위치(모델 x, y, 동작 첫 프레임 기준 이동 포함)
+  //  leadZ: ts 에서 손이 골반보다 앞으로 나온 거리 → 손끝이 골라인 바로 앞(HAND_Z)에 오도록 몸을 뒤로 둠
+  //  pel: ts 에서 골반 위치 (몸을 기울이는 중심)
+  const DIVE_CLIPS = {
+    // 동작에서는 두 손이 30~56cm 벌어져 공이 손 사이로 빠짐 → 오른손을 왼손 옆(17cm)으로 모으고, 모은 두 손 가운데를 공에 맞춤
+    GkDiveLow: { side: 1, t0: 0.45, ts: 1.05, tl: 1.4, lead: [2.08, 0.65], pel: [1.30, 0.89], leadZ: 0.74 },
+    GkDiveHigh: { side: -1, t0: 0.4, ts: 0.9, tl: 1.3, lead: [-2.34, 1.49], pel: [-1.39, 0.95], leadZ: 0.66 },
+  };
+  const DIVE_LIFT = [-0.4, 0.12]; // 몸 전체를 올리거나 내리는 양은 조금만 (나머지 높이는 몸을 기울여서)
+  const DIVE_FWD = 0.25; // 동작의 앞으로 나가는 움직임은 1/4만 (골라인을 지키도록)
+  const HAND_Z = 0.2; // 가장 길게 뻗었을 때 손의 앞뒤 위치 (키퍼 기준선에서)
+  function setupClipDive(K) {
+    const u = K.av.userData;
+    if (!u.anim || !u.bones || !PK.PlayerModel.meta) return null;
+    const d = K.dive, name = d.D.y >= 1.15 ? 'GkDiveHigh' : 'GkDiveLow';
+    const m = PK.PlayerModel.meta(name); if (!m || !m.path) return null;
+    const c = DIVE_CLIPS[name];
+    const mir = c.side === d.side ? 1 : -1; // 반대쪽이면 좌우를 뒤집어서
+    const p0 = PK.PlayerModel.pathAt(name, c.t0), ps = PK.PlayerModel.pathAt(name, c.ts);
+    const zFix = HAND_Z - c.leadZ - DIVE_FWD * (ps[1] - p0[1]); // 뻗은 순간 손이 골라인 앞에 오도록 몸을 뒤로 옮기는 양
+    return Object.assign({ name, mir, p0, zFix, dur: m.duration, rootX: K.diveRootX !== undefined ? K.diveRootX : K.av.position.x }, c);
+  }
+  // 매 프레임: 동작 시간(다이빙 시간 T 에 맞춰 늘이거나 줄임)과 선수 위치(손이 목표 지점에 닿도록 몸을 옮김)를 정하고 재생 위치(0~1)를 돌려줌
+  function clipDiveUpdate(K) {
+    const cd = K.clipDive, d = K.dive, tau = Math.max(0, st.time - K.diveStart);
+    // 실제 동작은 팔이 늦게 뻗어지므로, 계획 시간의 70% 에 다 뻗도록 빠르게 (기존 다이빙은 팔을 처음부터 뻗어 일찍 닿았음)
+    const T = d.T * PK.Tune.clipDiveT;
+    // 가장 길게 뻗은 뒤 잠깐 공중에 머묾(체공): 처음 0.3초는 동작을 천천히 → 공이 조금 늦게 와도 뻗은 손에 걸림
+    const after = tau - T, hang = after < 0.3 ? after * 0.35 : 0.105 + (after - 0.3);
+    // 처음에 빠르게 뻗고 끝에서 느려지게
+    const u = clamp(tau / T, 0, 1), ue = 1 - Math.pow(1 - u, PK.Tune.clipDiveEase);
+    const ct = tau < T ? cd.t0 + (cd.ts - cd.t0) * ue : Math.min(cd.dur - 0.01, cd.ts + hang);
+    // 목표: 공을 보고 보정한 점(re) → 기존과 같은 최대 다이빙 거리 안으로
+    let tx = K.re ? K.re.x : d.D.x, ty = K.re ? K.re.y : d.D.y;
+    const dx = tx, dy = ty - 0.91, dist = Math.hypot(dx, dy) || 1;
+    if (dist > d.maxReach) { tx = (dx / dist) * d.maxReach; ty = 0.91 + (dy / dist) * d.maxReach; }
+    ty = Math.max(0.2, ty); // 굴러오는 공: 장갑이 공 높이까지 내려가되 땅속으로는 들어가지 않게
+    // 1) 몸 전체 높이는 조금만 바꾸고  2) 나머지는 골반을 중심으로 몸을 기울여 손을 목표 높이로  3) 옆으로 모자란 거리는 몸을 옮김
+    const offY = clamp(ty - cd.lead[1], DIVE_LIFT[0], DIVE_LIFT[1]);
+    const vx = cd.mir * (cd.lead[0] - cd.pel[0]), vy = cd.lead[1] - cd.pel[1]; // 골반 → 손 (좌우 뒤집기 반영)
+    const len = Math.hypot(vx, vy), side = Math.sign(vx) || 1;
+    const pivotY = cd.pel[1] + offY;
+    const ang0 = Math.atan2(vy, Math.abs(vx)), ang1 = Math.asin(clamp((ty - pivotY) / len, -0.9, 0.97));
+    const roll = side * clamp(ang1 - ang0, -0.5, 0.7); // 손 쪽이 올라가는 방향으로 회전 (최대 약 40°)
+    const rvx = vx * Math.cos(roll) - vy * Math.sin(roll); // 기울인 뒤 골반 → 손 가로 거리
+    const pivotX0 = cd.mir * (cd.pel[0] - cd.p0[0]);
+    const offX = tx - rvx - pivotX0;
+    const sm = (a, b, x) => { const q = clamp((x - a) / (b - a), 0, 1); return q * q * (3 - 2 * q); };
+    const s1 = 1 - Math.pow(1 - u, PK.Tune.clipDiveEase + 0.5), s2 = sm(cd.ts, cd.tl, ct); // 목표 쪽으로 옮기는 것도 조금 앞쪽에 몰아서
+    const r = roll * s1 * (1 - s2), H = 0.85; // 골반 높이쯤을 중심으로 회전
+    const p = PK.PlayerModel.pathAt(cd.name, ct);
+    K.av.scale.x = cd.mir;
+    K.av.rotation.z = r;
+    // 두 손 모으기: 날아가는 동안 오른손을 왼손 옆으로 (착지 후 풀어 줌)
+    const gw = s1 * (1 - sm(cd.tl, cd.tl + 0.4, ct));
+    K.av.userData.postAnim = gw > 0.01 ? (B) => glovesTogether(B, gw) : null;
+    K.av.position.set(cd.rootX + cd.mir * (p[0] - cd.p0[0]) + offX * s1 + H * Math.sin(r),
+      offY * s1 * (1 - s2) + H * (1 - Math.cos(r)), KEEPER_Z + DIVE_FWD * (p[1] - cd.p0[1]) + cd.zFix * s1);
+    return ct / cd.dur;
+  }
+
+  // 오른팔(위팔)을 어깨 기준으로 돌려 오른손을 왼손 옆 17cm 자리로 (비율 w 만큼)
+  const _gv = [new V3(), new V3(), new V3(), new V3(), new V3()], _gq = new THREE.Quaternion();
+  function glovesTogether(B, w) {
+    const lead = B.hand_l.getWorldPosition(_gv[0]), trail = B.hand_r.getWorldPosition(_gv[1]);
+    const dir = _gv[2].subVectors(trail, lead); const dl = dir.length(); if (dl < 1e-4) return;
+    const tgt = _gv[3].copy(lead).addScaledVector(dir, 0.17 / dl);
+    tgt.lerp(trail, 1 - w);
+    const up = B.upperarm_r, par = up.parent;
+    const a = par.worldToLocal(_gv[4].copy(trail)).sub(up.position).normalize();
+    const b = par.worldToLocal(tgt).sub(up.position).normalize();
+    _gq.setFromUnitVectors(a, b);
+    up.quaternion.premultiply(_gq);
+    up.updateMatrixWorld(true);
   }
 
   // 세리머니·대기 자세로 바뀔 때만 섞음 (다이빙·버티기는 판정 범위와 정확히 일치해야 하므로 섞지 않음)
@@ -1035,9 +1195,11 @@ PK.Game = (function () {
     const kdt = K.lastT === undefined ? 0 : Math.max(0, t - K.lastT);
     K.lastT = t;
     if (!K.re) K.re = { x: d.D.x, y: d.D.y, rz: 0 };
-    const seesBall = st.shot && st.flight && tau > 0.06 + 0.2;
+    // 공을 본 지 0.2초가 지나면 손을 보정 (킥 후에 뛴 키퍼는 이미 공을 보고 있으므로 바로)
+    const seesBall = st.shot && st.flight && st.time - st.flight.t0 > 0.2 && tau > 0.05;
     if (seesBall) {
-      const tx = st.shot.target.x - K.av.position.x, ty = st.shot.target.y;
+      // 실제 다이빙 동작은 선수 위치 자체를 옮기므로, 다이빙을 시작한 자리 기준으로 계산
+      const tx = st.shot.target.x - (K.clipDive ? K.clipDive.rootX : K.av.position.x), ty = st.shot.target.y;
       const step = (cur, goal, rate) => cur + clamp(goal - cur, -rate * kdt, rate * kdt);
       K.re.x = step(K.re.x, clamp(tx, d.D.x - 0.7, d.D.x + 0.7), 3.2);
       K.re.y = step(K.re.y, clamp(ty, d.D.y - 0.6, d.D.y + 0.6), 3.2);
@@ -1045,14 +1207,18 @@ PK.Game = (function () {
 
     if (d.mode === 'center') {
       const shift = clamp(K.re.x - d.D.x, -0.45, 0.45);
-      P.hips.position.set(lerp(hx0, d.H.x, e) + shift * 0.6, lerp(0.89, d.H.y, e) + (d.jump ? Math.sin(f * Math.PI) * 0.1 : 0), 0);
+      // 점프: 가장 높은 곳에서 0.15초 머문 뒤 0.3초에 걸쳐 내려와 무릎으로 받으며 착지 (공중에 멈춰 있지 않게)
+      const land = d.jump ? clamp((tau - d.T - 0.15) / 0.3, 0, 1) : 0;
+      const jumpY = lerp(lerp(0.89, d.H.y, e) + Math.sin(f * Math.PI) * 0.1, 0.86, land * land);
+      P.hips.position.set(lerp(hx0, d.H.x, e) + shift * 0.6, d.jump ? jumpY : lerp(0.89, d.H.y, e), 0);
       P.hips.rotation.z = d.theta * e - clamp(K.re.x - P.hips.position.x, -0.6, 0.6) * 0.35;
       if (d.jump) {
         // 머리 위로 뻗되 두 손을 공 쪽으로 모음 (손 사이로 공이 빠지지 않게)
         const rx = K.re.x - P.hips.position.x, L = 0.62;
         const aL = Math.PI - Math.asin(clamp((rx + 0.07 - 0.235) / L, -1, 1));
         const aR = Math.PI - Math.asin(clamp((-(rx - 0.07) - 0.235) / L, -1, 1));
-        P.armL.rotation.set(0, 0, lerp(0.55, aL, er)); P.armR.rotation.set(0, 0, -lerp(0.55, aR, er));
+        const down = land * 0.35; // 내려오며 팔도 조금 내림
+        P.armL.rotation.set(0, 0, lerp(0.55, aL, er) - down); P.armR.rotation.set(0, 0, -lerp(0.55, aR, er) + down);
       } else {
         // 공이 올 높이로 두 손을 몸 앞에 모아 막기
         const shoulderY = P.hips.position.y + 0.5;
@@ -1064,11 +1230,13 @@ PK.Game = (function () {
       P.elbowL.rotation.x = P.elbowR.rotation.x = -0.25;
       const crouch = d.H.y < 0.85 ? 1 : 0.4;
       const spring = Math.sin(f * Math.PI);
+      const absorb = d.jump ? Math.sin(land * Math.PI) * (1 - land * 0.5) : 0; // 착지 순간 무릎을 굽혀 충격 흡수
+      const air = d.jump ? (f >= 1 ? 1 - land : spring) : 0; // 공중에 있는 동안 다리를 살짝 접음
       ['L', 'R'].forEach((s, i) => {
         const sg = i === 0 ? 1 : -1;
-        P['leg' + s].rotation.set(-0.45 * crouch - (d.jump ? spring * 0.35 : 0), 0, sg * lerp(0.12, 0.35, e));
-        P['knee' + s].rotation.x = 0.8 * crouch + (d.jump ? spring * 0.6 : spring * 0.12);
-        P['foot' + s].rotation.x = d.jump ? lerp(-0.3, 0.45, spring) : -0.3;
+        P['leg' + s].rotation.set(-0.45 * crouch - air * 0.35 - absorb * 0.3, 0, sg * lerp(0.12, 0.35, e));
+        P['knee' + s].rotation.x = 0.8 * crouch + (d.jump ? air * 0.6 + absorb * 0.5 : spring * 0.12);
+        P['foot' + s].rotation.x = d.jump ? lerp(-0.3, 0.45, air) : -0.3;
       });
       P.spine.rotation.x = lerp(0.22, 0.15, e);
       P.head.rotation.x = lerp(-0.2, d.jump ? -0.45 : -0.1, e);
@@ -1147,15 +1315,30 @@ PK.Game = (function () {
     const K = st.K; const P = K.av.userData.parts;
     K.av.updateMatrixWorld(true);
     const pt = (obj, x, y, z) => new V3(x, y, z).applyMatrix4(obj.matrixWorld);
-    const hips = pt(P.hips, 0, -0.02, 0);
-    const neck = pt(P.spine, 0, 0.58, 0);
-    const head = pt(P.head, 0, 0.01, 0);
-    const shL = pt(P.armL, 0, 0, 0), shR = pt(P.armR, 0, 0, 0);
-    const elL = pt(P.elbowL, 0, 0, 0), elR = pt(P.elbowR, 0, 0, 0);
-    const hdL = pt(P.handL, 0, -0.03, 0), hdR = pt(P.handR, 0, -0.03, 0);
-    const lgL = pt(P.legL, 0, 0, 0), lgR = pt(P.legR, 0, 0, 0);
-    const knL = pt(P.kneeL, 0, 0, 0), knR = pt(P.kneeR, 0, 0, 0);
-    const ftL = pt(P.footL, 0, -0.02, 0.06), ftR = pt(P.footR, 0, -0.02, 0.06);
+    let hips = pt(P.hips, 0, -0.02, 0);
+    let neck = pt(P.spine, 0, 0.58, 0);
+    let head = pt(P.head, 0, 0.01, 0);
+    let shL = pt(P.armL, 0, 0, 0), shR = pt(P.armR, 0, 0, 0);
+    let elL = pt(P.elbowL, 0, 0, 0), elR = pt(P.elbowR, 0, 0, 0);
+    let hdL = pt(P.handL, 0, -0.03, 0), hdR = pt(P.handR, 0, -0.03, 0);
+    let lgL = pt(P.legL, 0, 0, 0), lgR = pt(P.legR, 0, 0, 0);
+    let knL = pt(P.kneeL, 0, 0, 0), knR = pt(P.kneeR, 0, 0, 0);
+    let ftL = pt(P.footL, 0, -0.02, 0.06), ftR = pt(P.footR, 0, -0.02, 0.06);
+    const B = K.av.userData.bones;
+    if (K.clipDive && B && st.time >= K.diveStart) {
+      // 실제 다이빙 동작 중: 보이는 몸의 뼈 위치로 판정 (보이는 손에 맞으면 막힘)
+      const w = (n) => B[n].getWorldPosition(new V3());
+      const mid = (a, b) => w(a).add(w(b)).multiplyScalar(0.5);
+      hips = w('pelvis'); neck = w('neck_01');
+      const hb = w('Head'); head = hb.clone().add(hb.clone().sub(neck).setLength(0.09));
+      shL = w('upperarm_l'); shR = w('upperarm_r'); elL = w('lowerarm_l'); elR = w('lowerarm_r');
+      hdL = mid('hand_l', 'middle_01_l'); hdR = mid('hand_r', 'middle_01_r');
+      lgL = w('thigh_l'); lgR = w('thigh_r'); knL = w('calf_l'); knR = w('calf_r');
+      ftL = mid('foot_l', 'ball_l'); ftR = mid('foot_r', 'ball_r');
+      // 동작의 팔은 앞(키커 쪽)으로 뻗어 있어 공이 팔을 따라 미끄러져 들어감 → 판정은 손 깊이의 한 평면에 펼쳐 정면으로 맞게
+      const zp = (hdL.z + hdR.z) / 2;
+      [hips, neck, head, shL, shR, elL, elR, hdL, hdR, lgL, lgR, knL, knR, ftL, ftR].forEach((v) => { v.z = zp; });
+    }
     const caps = [
       { a: hips, b: neck, r: 0.155, part: 'body' },
       { a: head, b: head, r: 0.13, part: 'body' },
@@ -1165,6 +1348,12 @@ PK.Game = (function () {
       { a: lgL, b: knL, r: 0.085, part: 'leg' }, { a: knL, b: ftL, r: 0.07, part: 'leg' },
       { a: lgR, b: knR, r: 0.085, part: 'leg' }, { a: knR, b: ftR, r: 0.07, part: 'leg' },
     ];
+    // 실제 다이빙에서 두 장갑을 모았을 때: 두 손 사이도 장갑 면 (나란한 두 손바닥)
+    if (K.clipDive && st.time >= K.diveStart) {
+      // 실제 다이빙: 장갑을 조금 크게(골키퍼 장갑) + 모은 두 손 사이도 장갑 면 (나란한 두 손바닥)
+      caps.forEach((c) => { if (c.part === 'hand') c.r = PK.Tune.clipGloveR; });
+      if (hdL.distanceTo(hdR) < 0.35) caps.push({ a: hdL, b: hdR, r: PK.Tune.clipGloveR, part: 'hand' });
+    }
     // 속도 추정
     caps.forEach((c, i) => {
       const mid = c.a.clone().add(c.b).multiplyScalar(0.5);
@@ -1174,6 +1363,8 @@ PK.Game = (function () {
       c.mid = mid;
     });
     K.prev = caps.map((c) => c.mid);
+    // 실제 다이빙 동작은 몸이 골대 쪽으로 물러나며 떨어지는데, 그 움직임이 공을 골대 안으로 밀어 넣지 않게
+    if (K.clipDive) caps.forEach((c) => { if (c.vel.z < 0) c.vel.z = 0; if (c.vel.y < 0) c.vel.y *= 0.4; });
     K.hands = [hdL, hdR];
     return caps;
   }
@@ -1182,34 +1373,67 @@ PK.Game = (function () {
   // 키커는 판정에 쓰이지 않으므로 모든 전환을 섞음 (달리기→킥은 동작 안에서 이미 이어짐)
   const KICKER_BLEND = { react: 0.3, idle: 0.3, pause: 0.16, run: 0.2, kick: 0 };
   function kickerUpdate() {
+    if (st.Kk) st.Kk.animReq = [null, { fade: 0.2 }];
     const mode = kickerPoseRaw();
     if (mode) poseBlend(st.Kk.av, mode, KICKER_BLEND[mode] || 0);
+    // 실제 애니메이션(대기·달리기·세리머니)을 기존 관절 자세 위에 섞음. 공을 차는 동작은 기존 자세(발이 공에 정확히 닿도록)
+    const u = st.Kk && st.Kk.av.userData;
+    if (u && u.anim) u.anim(st.Kk.animReq[0], st.Kk.animReq[1]);
   }
+  // 달리기 애니메이션은 왼발이 가장 앞에 있을 때가 0.85 지점 → 런업 보폭 위상(ph = π/2 에서 왼발이 가장 앞)과 맞춤
+  const SPRINT_LEFT_FWD = 0.85;
+  const sprintPhase = (ph) => { const x = SPRINT_LEFT_FWD + (ph - Math.PI / 2) / (Math.PI * 2); return x - Math.floor(x); };
   function kickerPoseRaw() {
     const Kk = st.Kk; if (!Kk) return null;
     const av = Kk.av, P = av.userData.parts, t = st.time;
     PK.Avatar.resetPose(av);
 
     if (Kk.react) {
-      const f = clamp((t - Kk.react.t0) / 0.5, 0, 1);
-      if (Kk.react.good) { // 골 세리머니: 양팔 번쩍 + 점프
-        P.armL.rotation.z = lerp(0.12, 2.7, f); P.armR.rotation.z = -lerp(0.12, 2.7, f);
-        P.hips.position.y = 0.97 + (f >= 1 ? (0.5 - 0.5 * Math.cos(t * 12)) * 0.16 : 0);
-        P.kneeL.rotation.x = P.kneeR.rotation.x = f >= 1 ? 0.15 + (0.5 + 0.5 * Math.cos(t * 12)) * 0.35 : 0.15 * f;
-        P.head.rotation.x = -0.3 * f;
-      } else { // 아쉬움: 머리 감싸기
-        P.armL.rotation.set(-2.2 * f, 0, 0.5 * f); P.armR.rotation.set(-2.2 * f, 0, -0.5 * f);
-        P.elbowL.rotation.x = P.elbowR.rotation.x = -1.9 * f;
-        P.spine.rotation.x = 0.35 * f; P.head.rotation.x = 0.3 * f;
+      Kk.animReq = [Kk.react.good ? 'Yes' : 'Idle_No_Loop', { fade: 0.4 }];
+      const rt = t - Kk.react.t0;
+      const f = clamp(rt / 0.5, 0, 1);
+      const back = (x) => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2); // 살짝 넘쳤다 돌아오는 이징
+      if (Kk.react.good) { // 골 세리머니: 양팔 번쩍 + 점프 (무릎으로 받으며 착지)
+        const a = back(f);
+        const jt = Math.max(0, rt - 0.45), wv = Math.sin(jt * 1.9 * Math.PI * 2); // 한 번 점프 ≈ 0.53초 (끊김 없는 주기)
+        const ramp = clamp(jt / 0.2, 0, 1);
+        const air = Math.max(0, wv) * ramp; // 공중
+        const squash = Math.max(0, -wv) * ramp; // 착지·도약 준비
+        P.armL.rotation.set(-0.15 * a, 0, lerp(0.12, 2.65, a) + air * 0.12); P.armR.rotation.set(-0.15 * a, 0, -lerp(0.12, 2.65, a) - air * 0.12);
+        P.elbowL.rotation.x = P.elbowR.rotation.x = -0.15 - squash * 0.4;
+        P.hips.position.y = 0.97 + air * 0.17 - squash * 0.09 - Math.sin(f * Math.PI) * 0.04;
+        P.kneeL.rotation.x = P.kneeR.rotation.x = 0.1 + squash * 0.75 + air * 0.25;
+        P.legL.rotation.x = P.legR.rotation.x = -squash * 0.4 - air * 0.15;
+        P.footL.rotation.x = P.footR.rotation.x = air * 0.45 - squash * 0.3;
+        P.spine.rotation.x = squash * 0.2 - air * 0.12; P.head.rotation.x = -0.3 * f - air * 0.1;
+      } else { // 아쉬움: 머리 감싸기 → 고개 숙이고 몸을 살짝 흔듦
+        const e = easeInOut(f), sh = rt > 0.5 ? Math.sin((rt - 0.5) * 2.2) : 0;
+        P.armL.rotation.set(-2.2 * e, 0, 0.5 * e); P.armR.rotation.set(-2.2 * e, 0, -0.5 * e);
+        P.elbowL.rotation.x = P.elbowR.rotation.x = -1.9 * e;
+        P.spine.rotation.set(0.35 * e + Math.abs(sh) * 0.05, sh * 0.12, 0); P.head.rotation.set(0.3 * e, -sh * 0.1, 0);
+        P.hips.position.y = 0.97 - 0.03 * e;
+        P.kneeL.rotation.x = P.kneeR.rotation.x = 0.12 * e; P.legL.rotation.x = P.legR.rotation.x = -0.06 * e;
       }
       return 'react';
     }
 
     const run = Kk.run;
-    if (!run) { // 대기: 숨 고르기
-      P.hips.position.y = 0.97 + Math.sin(t * 2) * 0.008;
-      P.spine.rotation.x = 0.06;
-      P.head.rotation.x = 0.1;
+    if (!run) { // 대기: 숨 고르기 + 천천히 체중 옮기기 (발은 땅에 고정)
+      Kk.animReq = ['Idle_Loop', { fade: 0.3 }];
+      const sway = Math.sin(t * 0.9), br = Math.sin(t * 2);
+      const dx = sway * 0.025;
+      P.hips.position.set(dx, 0.965 + br * 0.006 - Math.abs(sway) * 0.006, 0);
+      P.hips.rotation.z = -sway * 0.035;
+      ['L', 'R'].forEach((s, i) => {
+        const sg = i === 0 ? 1 : -1, load = 1 + sg * sway; // 체중 실린 쪽 0~2
+        P['leg' + s].rotation.set(-0.05 * (2 - load), 0, Math.asin(clamp(-dx / 0.84, -1, 1)) + sway * 0.035);
+        P['knee' + s].rotation.x = 0.1 * (2 - load); // 쉬는 다리는 살짝 굽힘
+        P['foot' + s].rotation.x = -0.05 * (2 - load);
+        P['arm' + s].rotation.set(Math.sin(t * 0.9 + i * 1.5) * 0.05, 0, sg * (0.13 + br * 0.015));
+        P['elbow' + s].rotation.x = -0.2 - Math.sin(t * 0.9 + i) * 0.05;
+      });
+      P.spine.rotation.set(0.06 + br * 0.012, 0, sway * 0.05);
+      P.head.rotation.set(0.1 + Math.sin(t * 0.37) * 0.04, Math.sin(t * 0.45) * 0.18, -sway * 0.02); // 골대와 키퍼를 살핌
       return 'idle';
     }
     // 멈칫 처리: AI 는 정해둔 시점/길이, 사람은 누르고 있는 동안 (최소 0.3초, 최대 1초)
@@ -1230,6 +1454,17 @@ PK.Game = (function () {
       K.expectedContact = t + remain + (run.paused ? 0.3 : 0);
       if (!K.manual && K.timing === 'normal' && K.diveStart === Infinity && !run.paused && remain <= 0.06) K.diveStart = t;
     }
+    if (run.clip) {
+      // 실제 페널티킥 동작: 런업·킥·팔로우스루 전체. 멈칫하면 그 자리에서 동작이 멈춤
+      const def = run.clip;
+      Kk.animReq = kickClipPose(def, tau, av.position);
+      // 대기 방향에서 런업 방향으로 첫 0.25초 동안 부드럽게 돌아섬
+      const q = clamp(tau / 0.25, 0, 1), sq = q * q * (3 - 2 * q);
+      let dy = def.yaw - run.yaw0; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      av.rotation.y = run.yaw0 + dy * sq;
+      if (!run.kicked && tau >= run.contact) { run.kicked = true; launchBall(); }
+      return tau < run.contact ? 'run' : 'kick';
+    }
     if (run.paused) {
       // 멈칫: 그 자리에서 멈춰 서서 키퍼를 지켜봄
       const f = clamp(tau / run.approach, 0, 1);
@@ -1244,13 +1479,23 @@ PK.Game = (function () {
     }
     // 달리기 자세 (보폭 위상 ph): 마지막 걸음에 왼발(디딤발)이 앞으로 나오고 오른발이 뒤로 가도록 위상을 맞춤
     const runPose = (ph, amp) => {
-      const sw = Math.sin(ph) * 0.7 * amp;
+      const s = Math.sin(ph), sw = s * 0.7 * amp;
       return {
         legL: -sw, legR: sw,
         kneeL: (Math.max(0, Math.sin(ph - 1.2)) * 1.2 + 0.1) * amp,
         kneeR: (Math.max(0, Math.sin(ph + Math.PI - 1.2)) * 1.2 + 0.1) * amp,
-        armLx: sw * 0.8, armRx: -sw * 0.8, armLz: 0.12, armRz: -0.12, elbow: -1.2,
-        hipsY: 0.95 + Math.abs(Math.cos(ph)) * 0.05 * amp, spineX: 0.15, spineZ: 0, hipsRY: 0,
+        // 발목: 뒤로 차고 나갈 때 발끝을 펴고, 앞으로 내디딜 때 발끝을 들어 뒤꿈치부터 닿음
+        footL: (0.05 - 0.3 * Math.sin(ph - 0.5)) * amp, footR: (0.05 + 0.3 * Math.sin(ph - 0.5)) * amp,
+        // 팔: 다리와 반대로 흔들고, 앞으로 올 때 팔꿈치를 더 접음
+        armLx: sw * 0.8, armRx: -sw * 0.8, armLz: 0.15 + Math.max(0, -s) * 0.06 * amp, armRz: -0.15 - Math.max(0, s) * 0.06 * amp,
+        elbow: -1.2, elbowL: -1.15 + 0.28 * s * amp, elbowR: -1.15 - 0.28 * s * amp,
+        // 몸통: 내딛는 다리 쪽 골반이 앞으로 돌고, 어깨는 반대로 돌며, 머리는 정면 유지
+        hipsRY: -0.12 * s * amp, spineY: 0.2 * s * amp, headY: -0.08 * s * amp,
+        hipsRZ: 0.035 * s * amp,
+        // 보폭이 가장 벌어질 때(체공) 가장 높고, 두 다리가 교차할 때(착지 지지) 가장 낮음
+        hipsY: 0.945 + (Math.abs(s) - 0.5) * 0.05 * amp,
+        spineX: 0.13 + 0.06 * amp + 0.025 * Math.cos(2 * ph) * amp, spineZ: 0,
+        headX: -0.08 * amp - 0.02 * Math.cos(2 * ph) * amp, // 몸이 숙여진 만큼 시선은 앞으로
       };
     };
     const phaseAt = (tt) => RUN_W * (tt - run.approach) + RUN_PH_END;
@@ -1260,6 +1505,8 @@ PK.Game = (function () {
       av.rotation.y = runYaw(f);
       // 출발 직후엔 보폭이 작고 점점 커짐
       applyPose(P, runPose(phaseAt(tau), Math.min(1, 0.45 + f * 1.2)));
+      // 실제 달리기 애니메이션 (보폭 위상 맞춤). 마지막 0.2초는 킥 동작으로 넘어가도록 기존 자세 쪽으로 섞음
+      Kk.animReq = run.approach - tau > 0.2 ? ['Sprint_Loop', { fade: 0.25, phase: sprintPhase(phaseAt(tau)) }] : [null, { fade: 0.2 }];
       return 'run';
     }
     // 킥 동작: 달려온 속도 그대로 몸이 앞으로 흘러가며 차고, 차고 난 뒤 한두 걸음 더 나감
@@ -1268,12 +1515,16 @@ PK.Game = (function () {
     av.position.copy(RUN_END).addScaledVector(RUN_DIR, c);
     av.rotation.y = runYaw(1);
     const kp = { legL: 0, legR: 0, kneeL: 0, kneeR: 0, armLx: -0.3, armRx: 0.4, armLz: 1.0, armRz: -0.6, elbow: -0.4,
+      elbowL: -0.35, elbowR: -0.55, footL: -0.1, footR: 0.5, spineY: -0.1, headY: 0.05, hipsRZ: 0.06,
+      // 차기 전에는 공을 내려다보고, 차고 나서도 잠깐 공이 있던 자리를 봄
+      headX: lerp(0.35, 0.15, clamp((k - 0.2) / 0.3, 0, 1)),
       hipsY: 0.965, spineX: 0.1, spineZ: 0.12, hipsRY: 0 };
     // 디딤발: 앞에 내디딘 뒤 몸이 넘어가는 만큼 뒤로 (발이 땅에서 미끄러지지 않게)
     kp.legL = -0.45 + c / 0.9; kp.kneeL = 0.35;
     if (k < 0.1) { // 백스윙: 달리던 다리가 그대로 뒤로 감김
       const q = k / 0.1, eo = 1 - (1 - q) * (1 - q);
-      kp.legR = lerp(0.55, 1.05, eo); kp.kneeR = lerp(0.85, 1.75, eo);
+      // 달리기 마지막 순간의 오른 무릎 각도에서 바로 이어서 접힘 (펴졌다 다시 접히지 않게)
+      kp.legR = lerp(0.55, 1.05, eo); kp.kneeR = lerp(runPose(RUN_PH_END, 1).kneeR, 1.75, eo);
       kp.hipsRY = lerp(0, 0.22, eo); kp.spineX = lerp(0.12, 0.03, q);
     } else if (k < 0.2) { // 앞으로 휘두르며 가속 → 임팩트: 발이 공 높이·위치에 닿음 (다리는 몸보다 살짝 앞)
       const q = (k - 0.1) / 0.1;
@@ -1287,6 +1538,7 @@ PK.Game = (function () {
       kp.kneeR = lerp(0.5, 0.1, q);
       kp.hipsRY = lerp(-0.05, -0.2, q);
       kp.spineX = -0.06;
+      kp.hipsY = lerp(0.965, 0.93, q * q * (3 - 2 * q)); // 차고 나서 몸이 내려앉는 것도 이어지게
     } else { // 팔로우스루 → 차는 발을 앞으로 내디디며 착지, 한 걸음 더
       const q = clamp((k - 0.265) / 0.45, 0, 1);
       kp.legR = lerp(-1.5, -0.25, easeInOut(q));
@@ -1298,25 +1550,30 @@ PK.Game = (function () {
       const q2 = clamp((k - 0.6) / 0.35, 0, 1);
       kp.legL = lerp(kp.legL, -0.35, easeInOut(q2)); kp.kneeL = lerp(0.35, 0.5, Math.sin(q2 * Math.PI));
       kp.armLz = lerp(1.0, 0.3, q); kp.armRz = lerp(-0.6, -0.25, q);
+      kp.footR = lerp(0.5, 0, easeInOut(q)); kp.footL = lerp(-0.1, 0.25, q2); // 착지하며 발목이 풀리고, 왼발은 차고 나감
+      kp.spineY = lerp(-0.1, 0, q); kp.hipsRZ = lerp(0.06, 0, q);
     }
     if (!run.kicked && k >= run.contact - run.approach) { run.kicked = true; launchBall(); }
     // 달리기 자세에서 킥 자세로 자연스럽게 섞기 (처음 0.14초)
     const wgt = clamp(k / 0.14, 0, 1);
     const sm = wgt * wgt * (3 - 2 * wgt);
     const rp = runPose(phaseAt(tau), 1);
+    rp.legR = kp.legR; rp.kneeR = kp.kneeR; // 차는 다리는 처음부터 킥 동작을 따름 (시작 값이 달리기 끝과 같음)
     const mix = {};
     for (const key in kp) mix[key] = lerp(rp[key], kp[key], sm);
     applyPose(P, mix);
-    P.footR.rotation.x = 0.5 * sm; // 발등으로 차기
     return 'kick';
   }
   function applyPose(P, p) {
     P.legL.rotation.x = p.legL; P.legR.rotation.x = p.legR;
     P.kneeL.rotation.x = p.kneeL; P.kneeR.rotation.x = p.kneeR;
+    if (p.footL !== undefined) { P.footL.rotation.x = p.footL; P.footR.rotation.x = p.footR; }
     P.armL.rotation.set(p.armLx, 0, p.armLz); P.armR.rotation.set(p.armRx, 0, p.armRz);
-    P.elbowL.rotation.x = P.elbowR.rotation.x = p.elbow;
-    P.hips.position.y = p.hipsY; P.hips.rotation.y = p.hipsRY;
-    P.spine.rotation.x = p.spineX; P.spine.rotation.z = p.spineZ;
+    P.elbowL.rotation.x = p.elbowL !== undefined ? p.elbowL : p.elbow;
+    P.elbowR.rotation.x = p.elbowR !== undefined ? p.elbowR : p.elbow;
+    P.hips.position.y = p.hipsY; P.hips.rotation.y = p.hipsRY; P.hips.rotation.z = p.hipsRZ || 0;
+    P.spine.rotation.set(p.spineX, p.spineY || 0, p.spineZ);
+    P.head.rotation.set(p.headX || 0, p.headY || 0, 0);
   }
 
   // ---------- 공 비행 ----------
@@ -1662,5 +1919,5 @@ PK.Game = (function () {
     st.state = 'end';
   }
 
-  return { init, start, update, quit, opponentLeft, get active() { return st.active; }, _st: st, _shotMap: renderShotMap, _test: { planDive, keeperPose, keeperCapsules } };
+  return { init, start, update, quit, opponentLeft, get active() { return st.active; }, _st: st, _shotMap: renderShotMap, _test: { planDive, keeperPose, keeperCapsules, scene: () => scene } };
 })();

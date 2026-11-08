@@ -7,3 +7,9 @@ https://quaternius.com/packs/universalbasecharacters.html
 
 게임용으로 텍스처를 1024px WebP로 줄이고 파일을 하나로 합침 (glTF-Transform).
 hair.glb 에는 Hair_Buzzed, Hair_SimpleParted, Hair_Long, Hair_Buns, Hair_Beard 를 합쳐 둠.
+
+models/anims.json: animation clips (Idle_Loop, Sprint_Loop, Jog_Fwd_Loop, Yes, Idle_No_Loop) from
+Quaternius "Universal Animation Library" 1 and 2 - CC0 1.0 (https://quaternius.com)
+models/anims.json also contains clips retargeted from Adobe Mixamo animations
+(PenaltyKick, InstepKick, GkIdle, GkDiveLow, GkDiveHigh, StandUp, GkCatch), used inside this game
+under the Mixamo terms. The original Mixamo files are not included in this repository.

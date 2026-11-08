@@ -23,11 +23,46 @@ PK.PlayerModel = (function () {
     // Claude 아티팩트는 .glb를 제공하지 않아 같은 파일을 .glb.wasm 이름으로도 올려 둠 → 실패하면 그쪽으로
     const get1 = (u) => new Promise((res, rej) => loader.load(u, res, undefined, rej));
     const get = (u) => get1(u).catch(() => get1(u + '.wasm'));
-    return Promise.all([get('models/player.glb'), get('models/hair.glb')]).then(([b, h]) => {
+    // 실제 애니메이션(대기·달리기·세리머니): 없어도 게임은 기존 동작으로 진행
+    const anims = fetch('models/anims.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    return Promise.all([get('models/player.glb'), get('models/hair.glb'), anims]).then(([b, h, a]) => {
       base = b; hairs = h;
       prepare();
+      if (a) buildClips(a);
       api.ready = true;
     });
+  }
+
+  // ---------- 실제 애니메이션 클립 (Quaternius Universal Animation Library, CC0 · 같은 뼈대) ----------
+  let clips = {};
+  const clipMeta = {};
+  function buildClips(data) {
+    let restPelvis = null;
+    base.scene.traverse((o) => { if (o.isBone && o.name === 'pelvis' && !restPelvis) restPelvis = o.position.clone(); });
+    const tp = data.tposePelvis || [0, 0, 0];
+    data.clips.forEach((c) => {
+      // 두 가지 형식: 트랙마다 시간(t)이 있는 것(UAL) / 일정 간격(fps·frames)으로 값만 있는 것(Mixamo에서 옮긴 것, 골반 위치는 이미 이 모델 기준)
+      const even = c.fps ? Array.from({ length: c.frames }, (_, i) => Math.min(c.duration, i / c.fps)) : null;
+      const tracks = c.tracks.map((t) => {
+        const st = t.n.endsWith('.quaternion') ? 4 : 3;
+        const times = t.t || (t.v.length === st ? [0] : even);
+        if (st === 4) return new THREE.QuaternionKeyframeTrack(t.n, times, t.v);
+        const v = t.v.slice();
+        if (!c.fps) { // 골반 위치: 원본 기본 자세와의 차이만 이 모델 골반에 더함
+          for (let i = 0; i < v.length; i += 3) { v[i] += restPelvis.x - tp[0]; v[i + 1] += restPelvis.y - tp[1]; v[i + 2] += restPelvis.z - tp[2]; }
+        }
+        return new THREE.VectorKeyframeTrack(t.n, times, v);
+      });
+      clips[c.name] = new THREE.AnimationClip(c.name, c.duration, tracks);
+      // 몸 전체 이동 경로(모델 좌표 x,z), 공을 차는 순간 등: 게임이 선수 위치를 옮기는 데 씀
+      clipMeta[c.name] = { duration: c.duration, fps: c.fps, path: c.path || null, contact: c.contact, ball: c.ball };
+    });
+  }
+  // 경로 보간: 시간 t 에서 몸 이동량 [x, z]
+  function pathAt(name, t) {
+    const m = clipMeta[name]; if (!m || !m.path) return [0, 0];
+    const n = m.path.length / 2, f = Math.max(0, Math.min(n - 1, t * m.fps)), i = Math.min(n - 2, Math.floor(f)), a = f - i;
+    return [m.path[i * 2] * (1 - a) + m.path[i * 2 + 2] * a, m.path[i * 2 + 1] * (1 - a) + m.path[i * 2 + 3] * a];
   }
 
   // 기본 자세(T자)에서 각 정점이 어느 옷 부위인지 정하고, 옷 부위는 표면을 살짝 부풀림
@@ -358,6 +393,7 @@ if (cloth > 0.5) roughnessFactor = (rg > 4.5 && rg < 5.5) ? 0.35 : 0.82;`);
     }
 
     setupRetarget(root, model, bones, { decal, lid });
+    root.userData.bones = bones; // 보이는 몸의 뼈 (실제 다이빙 동작 중에는 이 뼈로 막기 판정)
   }
 
   // 입 모양 그림 (표정 6가지)
@@ -451,6 +487,65 @@ if (cloth > 0.5) roughnessFactor = (rg > 4.5 && rg < 5.5) ? 0.35 : 0.82;`);
     root.quaternion.copy(rootQ); root.position.copy(rootP);
 
     const tq = new THREE.Quaternion(), pq = new THREE.Quaternion(), tmp = new THREE.Vector3(), rootInv = new THREE.Quaternion();
+
+    // 실제 애니메이션 재생: 게임이 매 프레임 anim(이름 | null, {fade, phase}) 로 원하는 동작을 알려줌
+    //  w = 실제 애니메이션 비중 (0 = 기존 관절 자세만, 1 = 애니메이션만) → 사이를 부드럽게 섞음
+    const bones = [];
+    model.traverse((o) => { if (o.isBone && o.name !== 'root') bones.push(o); });
+    const q0 = bones.map(() => new THREE.Quaternion()), qc = new THREE.Quaternion(), p0 = new THREE.Vector3();
+    const mixer = Object.keys(clips).length ? new THREE.AnimationMixer(model) : null;
+    const actions = {};
+    const A = { want: null, fade: 0.25, phase: null, cur: null, w: 0, last: 0 };
+    root.userData._anim = A; // 점검용
+    root.userData.anim = function (name, opt) {
+      if (!mixer) return;
+      opt = opt || {};
+      if (name && !clips[name]) name = null;
+      A.fade = opt.fade !== undefined ? opt.fade : 0.25;
+      A.phase = opt.phase !== undefined ? opt.phase : null;
+      A.speed = opt.speed || 1;
+      if (name === A.want) return;
+      A.want = name;
+      if (!name) return; // 지금 동작을 유지한 채 비중만 줄여 기존 자세로
+      let act = actions[name];
+      if (!act) { act = actions[name] = mixer.clipAction(clips[name]); }
+      const prev = A.cur;
+      act.reset(); act.enabled = true; act.setEffectiveTimeScale(1); act.setEffectiveWeight(1); act.play();
+      if (prev && prev !== act && A.w > 0.01 && A.fade > 0) act.crossFadeFrom(prev, A.fade, false);
+      else if (prev && prev !== act) prev.stop();
+      A.cur = act;
+    };
+    const applyAnim = () => {
+      if (!mixer) return;
+      const now = api.clock ? api.clock() : performance.now() / 1000; // clock: 시험용으로 게임 시간을 쓸 때
+      const dt = A.last ? Math.min(0.1, Math.max(0, now - A.last)) : 0;
+      A.last = now;
+      const target = A.want ? 1 : 0;
+      A.w = A.fade > 0 ? A.w + Math.max(-dt / A.fade, Math.min(dt / A.fade, target - A.w)) : target;
+      if (A.w <= 0 || !A.cur) {
+        if (A.cur && !A.want) {
+          // 멈추면 three.js 가 처음 연결할 때의 자세로 뼈를 되돌려 한 프레임 이상한 자세가 보임 → 지금 자세를 지켜 둠
+          bones.forEach((b, i) => q0[i].copy(b.quaternion)); p0.copy(pelvis.position);
+          mixer.stopAllAction(); A.cur = null;
+          bones.forEach((b, i) => b.quaternion.copy(q0[i])); pelvis.position.copy(p0);
+        }
+        return;
+      }
+      // 기존 관절 자세를 기억해 두고, 애니메이션 자세와 비중만큼 섞음
+      bones.forEach((b, i) => q0[i].copy(b.quaternion)); p0.copy(pelvis.position);
+      if (A.phase !== null && A.want) { A.cur.timeScale = 0; A.cur.time = A.phase * A.cur.getClip().duration; }
+      else A.cur.timeScale = A.speed || 1;
+      // three.js 는 값이 지난 프레임과 같으면 뼈에 다시 쓰지 않음 → 위에서 기존 자세를 먼저 써 두었으므로
+      // 그 프레임만 기존 자세가 보이며 몸이 떨림. 지난 결과를 지워서 매 프레임 반드시 쓰게 함
+      const bs = mixer._bindings;
+      for (let i = 0; i < bs.length; i++) { const s = bs[i].valueSize; bs[i].buffer.fill(NaN, s, 3 * s); }
+      mixer.update(dt);
+      if (A.w < 1) {
+        bones.forEach((b, i) => { qc.copy(b.quaternion); b.quaternion.copy(q0[i]).slerp(qc, A.w); });
+        pelvis.position.lerpVectors(p0, pelvis.position, A.w);
+      }
+    };
+
     root.userData.sync = function () {
       root.updateMatrixWorld(true);
       rootInv.copy(root.getWorldQuaternion(new THREE.Quaternion())).invert();
@@ -466,11 +561,18 @@ if (cloth > 0.5) roughnessFactor = (rg > 4.5 && rg < 5.5) ? 0.35 : 0.82;`);
         e.bone.quaternion.copy(pq.invert().multiply(tq));
         e.bone.updateMatrixWorld(true);
       }
+      applyAnim();
+      // 게임이 동작 위에 덧붙이는 손질 (예: 다이빙 중 두 손을 모음)
+      if (root.userData.postAnim) { model.updateMatrixWorld(true); root.userData.postAnim(B); }
     };
     root.userData.sync();
   }
 
   api.load = load;
   api.attach = attach;
+  api.clips = () => clips;
+  api.meta = (name) => clipMeta[name] || null;
+  api.pathAt = pathAt;
+  api.addClips = (data) => buildClips(data);
   return api;
 })();

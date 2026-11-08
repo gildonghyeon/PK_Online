@@ -8,3 +8,5 @@ desktop.ini
 .vscode/
 *.log
 node_modules/
+models/_tmp/
+mixamo/
