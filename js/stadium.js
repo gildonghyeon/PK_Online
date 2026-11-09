@@ -66,7 +66,19 @@ PK.Stadium = (function () {
 
     const tex = PK.canvasTex(cv);
     tex.anisotropy = 8;
-    const pitch = new THREE.Mesh(new THREE.PlaneGeometry(W, D), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+    const pitchM = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+    // 가까이서 보이는 잔디 결: 아주 잘게 밝기를 흩뿌림 (멀리서는 반짝이지 않게 흐려짐)
+    pitchM.extensions = { derivatives: true };
+    pitchM.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+vec2 gp = vUv * vec2(${W * 110}.0, ${D * 110}.0);
+vec2 gw = fwidth(gp);
+float fade = clamp(1.4 - max(gw.x, gw.y) * 0.9, 0.0, 1.0);
+float h1 = fract(sin(dot(floor(gp), vec2(12.9898, 78.233))) * 43758.5453);
+float h2 = fract(sin(dot(floor(gp * vec2(0.5, 0.18)), vec2(39.346, 11.135))) * 24634.6345);
+diffuseColor.rgb *= 1.0 + fade * ((h1 - 0.5) * 0.22 + (h2 - 0.5) * 0.14);`);
+    };
+    const pitch = new THREE.Mesh(new THREE.PlaneGeometry(W, D), pitchM);
     pitch.rotation.x = -Math.PI / 2;
     pitch.position.set(0, 0, z0 + D / 2);
     pitch.receiveShadow = true;
@@ -169,75 +181,190 @@ PK.Stadium = (function () {
     out.adTex = adTex;
 
     // ---------- 관중석 ----------
-    const standM = new THREE.MeshStandardMaterial({ color: '#2a2f3a', roughness: 0.9 });
-    const crowdGeo = new THREE.BoxGeometry(0.42, 0.62, 0.32);
-    const crowdM = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+    // 계단식 좌석(층마다 의자 줄) + 앞쪽 LED 광고 띠 + 지붕. 관중은 사람 모양을 한 번에 그리고(인스턴싱), 움직임은 그래픽 카드에서 계산
+    const standM = new THREE.MeshStandardMaterial({ color: '#2b313d', roughness: 0.92 });
+    const concreteM = new THREE.MeshStandardMaterial({ color: '#3a414e', roughness: 0.95 });
+    const roofM = new THREE.MeshStandardMaterial({ color: '#1c2129', roughness: 0.7, metalness: 0.3, side: THREE.DoubleSide });
+    const steelM = new THREE.MeshStandardMaterial({ color: '#8a919c', roughness: 0.4, metalness: 0.6 });
+    // 좌석 텍스처: 팀 색처럼 보이는 줄무늬 의자 (빈자리로 보임)
+    const seatCv = document.createElement('canvas'); seatCv.width = 64; seatCv.height = 16;
+    const sg = seatCv.getContext('2d'); sg.fillStyle = '#20252e'; sg.fillRect(0, 0, 64, 16);
+    for (let i = 0; i < 8; i++) { sg.fillStyle = i % 4 === 0 ? '#0f5ea8' : '#1667b9'; sg.fillRect(i * 8 + 1, 3, 6, 9); }
+    const seatTex = PK.canvasTex(seatCv); seatTex.wrapS = THREE.RepeatWrapping;
+    // LED 광고 띠 (관중석 맨 앞)
+    const ledCv = document.createElement('canvas'); ledCv.width = 1024; ledCv.height = 32;
+    const lg = ledCv.getContext('2d');
+    ['#0d3b8c', '#111', '#c6ff3d', '#d42a2a', '#111'].forEach((c, i) => { lg.fillStyle = c; lg.fillRect(i * 205, 0, 205, 32); });
+    lg.font = '900 20px Arial'; lg.textAlign = 'center'; lg.textBaseline = 'middle';
+    ['PK ONLINE', 'PENALTY NIGHT', 'GOAL!', '11M CLUB', 'KEEPER CUP'].forEach((t, i) => { lg.fillStyle = i === 2 ? '#111' : '#fff'; lg.fillText(t, i * 205 + 102, 17); });
+    const ledTex = PK.canvasTex(ledCv); ledTex.wrapS = THREE.RepeatWrapping;
+    out.ledTex = ledTex;
+
     const seats = [];
+    const ROW_H = 0.55, ROW_D = 0.85, BASE_Y = 1.6;
     const addStand = (cx, cz, w, rotY, rows) => {
       const grp = new THREE.Group();
       grp.position.set(cx, 0, cz); grp.rotation.y = rotY;
+      // 앞 벽 + LED 띠
+      const front = new THREE.Mesh(new THREE.BoxGeometry(w, BASE_Y, 0.4), concreteM); front.position.set(0, BASE_Y / 2, 0.45); grp.add(front);
+      const ledM = new THREE.MeshBasicMaterial({ map: ledTex.clone() }); ledM.map.needsUpdate = true; ledM.map.repeat.x = w / 14;
+      const led = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.55), ledM); led.position.set(0, BASE_Y - 0.4, 0.66); grp.add(led);
+      out.leds = (out.leds || []).concat(ledM.map);
       for (let rI = 0; rI < rows; rI++) {
-        const step = new THREE.Mesh(new THREE.BoxGeometry(w, 0.7, 1.1), standM);
-        step.position.set(0, 1.2 + rI * 0.7 - 0.35, -rI * 1.1);
-        step.receiveShadow = true;
-        grp.add(step);
-        for (let x = -w / 2 + 0.4; x < w / 2 - 0.3; x += 0.55) {
-          if (Math.random() < 0.1) continue;
-          seats.push({ grp, x: x + (Math.random() - 0.5) * 0.12, y: 1.2 + rI * 0.7 + 0.31, z: -rI * 1.1 + (Math.random() - 0.5) * 0.15 });
+        const y = BASE_Y + rI * ROW_H;
+        const step = new THREE.Mesh(new THREE.BoxGeometry(w, ROW_H, ROW_D), standM);
+        step.position.set(0, y - ROW_H / 2, -rI * ROW_D); step.receiveShadow = true; grp.add(step);
+        // 의자 줄 (사람이 없는 자리에서 보임)
+        const sm = new THREE.MeshLambertMaterial({ map: seatTex.clone() }); sm.map.needsUpdate = true; sm.map.repeat.x = w / 4;
+        const seatRow = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.32), sm);
+        seatRow.position.set(0, y + 0.16, -rI * ROW_D - 0.18); grp.add(seatRow);
+        for (let x = -w / 2 + 0.3; x < w / 2 - 0.25; x += 0.5) {
+          if (Math.random() < 0.07) continue; // 빈자리
+          seats.push({ grp, x: x + (Math.random() - 0.5) * 0.08, y, z: -rI * ROW_D + 0.05 + (Math.random() - 0.5) * 0.06, row: rI });
         }
       }
+      const depth = rows * ROW_D, topY = BASE_Y + rows * ROW_H;
       // 뒤 벽
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, rows * 0.7 + 4, 0.5), standM);
-      wall.position.set(0, (rows * 0.7 + 4) / 2, -rows * 1.1);
-      grp.add(wall);
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, topY + 3, 0.5), concreteM); wall.position.set(0, (topY + 3) / 2, -depth); grp.add(wall);
+      // 지붕: 뒤에서 앞으로 살짝 올라가는 판 + 기둥
+      const roof = new THREE.Mesh(new THREE.PlaneGeometry(w + 1, depth + 3), roofM);
+      roof.rotation.x = -Math.PI / 2 + 0.12; roof.position.set(0, topY + 3.2, -depth / 2 + 0.3); grp.add(roof);
+      for (let x = -w / 2 + 2; x <= w / 2 - 2; x += 12) {
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, topY + 3, 8), steelM); col.position.set(x, (topY + 3) / 2, -depth + 0.4); grp.add(col);
+        const truss = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, depth + 3), steelM); truss.position.set(x, topY + 3.05, -depth / 2 + 0.3); truss.rotation.x = 0.12; grp.add(truss);
+      }
       scene.add(grp);
       return grp;
     };
-    addStand(0, -7, 60, 0, 14);
-    addStand(-27, 16, 44, Math.PI / 2, 12);
-    addStand(27, 16, 44, -Math.PI / 2, 12);
+    addStand(0, -7, 62, 0, 16);
+    addStand(-27, 16, 46, Math.PI / 2, 14);
+    addStand(27, 16, 46, -Math.PI / 2, 14);
+    // 모서리 관중석 (뒤 관중석과 옆 관중석 사이 빈 곳)
+    addStand(-31.5, -8.5, 11, Math.PI / 4, 14);
+    addStand(31.5, -8.5, 11, -Math.PI / 4, 14);
 
-    const crowd = new THREE.InstancedMesh(crowdGeo, crowdM, seats.length);
-    const palette = ['#d42a2a', '#ffffff', '#1b54d1', '#ffd21f', '#222', '#e0e0e0', '#ff7a1a', '#3fbf5a'];
+    // 관중 한 명 모양 (앉은 자세 기준, 발밑 = 좌석 높이): 몸통·다리 / 머리 / 왼팔 / 오른팔 을 part 값으로 구분
+    const fanGeo = (() => {
+      const parts = [];
+      const piece = (geo, part, x, y, z) => { geo.translate(x, y, z); const g2 = geo.toNonIndexed(); const n = g2.attributes.position.count; g2.setAttribute('part', new THREE.Float32BufferAttribute(new Array(n).fill(part), 1)); parts.push(g2); };
+      // 관중이 수천 명이라 한 명당 삼각형 약 100개로 가볍게 (휴대폰에서도 부드럽게)
+      piece(new THREE.CylinderGeometry(0.15, 0.17, 0.48, 6, 1, true), 0, 0, 0.5, 0); // 몸통
+      piece(new THREE.BoxGeometry(0.3, 0.14, 0.4), 0, 0, 0.2, 0.12);                  // 허벅지(앉음)
+      piece(new THREE.SphereGeometry(0.105, 7, 5), 1, 0, 0.88, 0.01);                 // 머리
+      piece(new THREE.CylinderGeometry(0.045, 0.04, 0.42, 5, 1, true), 2, 0.2, 0.52, 0.02);   // 왼팔 (어깨 0.73 에서 아래로)
+      piece(new THREE.CylinderGeometry(0.045, 0.04, 0.42, 5, 1, true), 3, -0.2, 0.52, 0.02);  // 오른팔
+      piece(new THREE.CircleGeometry(0.15, 6).rotateX(-Math.PI / 2), 0, 0, 0.74, 0);   // 어깨 위 덮개
+      const merged = new THREE.BufferGeometry();
+      ['position', 'normal', 'part'].forEach((name) => {
+        const size = parts[0].attributes[name].itemSize; let total = 0; parts.forEach((p) => (total += p.attributes[name].array.length));
+        const arr = new Float32Array(total); let o = 0; parts.forEach((p) => { arr.set(p.attributes[name].array, o); o += p.attributes[name].array.length; });
+        merged.setAttribute(name, new THREE.BufferAttribute(arr, size));
+      });
+      return merged;
+    })();
+    const N = seats.length;
+    const aPhase = new Float32Array(N), aTeam = new Float32Array(N), aSkin = new Float32Array(N);
+    fanGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(aPhase, 1));
+    fanGeo.setAttribute('aTeam', new THREE.InstancedBufferAttribute(aTeam, 1));
+    fanGeo.setAttribute('aSkin', new THREE.InstancedBufferAttribute(aSkin, 1));
+    const U = { uTime: { value: 0 }, uExcite: { value: 0 }, uCheer: { value: -1 } };
+    const crowdM = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+    crowdM.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', `#include <common>
+attribute float part; attribute float aPhase; attribute float aTeam; attribute float aSkin;
+uniform float uTime; uniform float uExcite; uniform float uCheer;
+varying float vPart; varying float vSkin;`)
+        .replace('#include <begin_vertex>', `
+vec3 transformed = vec3(position);
+vPart = part; vSkin = aSkin;
+// 기쁨(+1) / 아쉬움(-1) / 중립(0.4): 응원 팀이면 일어나 팔을 들고 뛰고, 상대 팀이면 머리를 감쌈
+float mood = uCheer < -0.5 ? 0.0 : (abs(aTeam - uCheer) < 0.5 ? 1.0 : (aTeam > 1.5 ? 0.4 : -1.0));
+float ex = uExcite * (0.75 + 0.25 * fract(aPhase * 7.13));
+float joy = max(mood, 0.0) * ex, sad = max(-mood, 0.0) * ex;
+float hop = max(0.0, sin(uTime * (8.0 + fract(aPhase * 3.7) * 3.0) + aPhase * 6.2831)) * 0.22 * joy;
+float stand = 0.32 * clamp(joy * 1.6, 0.0, 1.0) + 0.12 * clamp(sad * 1.6, 0.0, 1.0);
+if (part > 1.5) {
+  float side = part > 2.5 ? -1.0 : 1.0;
+  float wave = 0.25 * sin(uTime * 9.0 + aPhase * 17.0);
+  float ang = side * (joy * (2.7 + wave) + sad * 2.3); // 팔을 머리 위로 / 머리 쪽으로
+  vec2 pivot = vec2(side * 0.2, 0.73);
+  vec2 q = transformed.xy - pivot; float c = cos(ang), s = sin(ang);
+  transformed.xy = pivot + vec2(c * q.x - s * q.y, s * q.x + c * q.y);
+  transformed.z += sad * 0.12;
+}
+if (part > 0.5 && part < 1.5) transformed.z += sad * 0.06 - joy * 0.02;
+transformed.y += hop + stand;
+transformed.x += sin(uTime * 1.3 + aPhase * 20.0) * 0.012; // 가만히 있을 때도 살짝 움직임`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+varying float vPart; varying float vSkin;`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+// 머리(와 절반쯤의 팔)는 피부색
+vec3 skin = mix(vec3(0.95, 0.76, 0.6), vec3(0.32, 0.2, 0.13), vSkin);
+if (vPart > 0.5 && vPart < 1.5) diffuseColor.rgb = skin * 0.85;
+if (vPart > 1.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;`);
+    };
+    const crowd = new THREE.InstancedMesh(fanGeo, crowdM, N);
+    crowd.frustumCulled = false;
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
     seats.forEach((s, i) => {
       s.grp.updateMatrixWorld();
       const p = new THREE.Vector3(s.x, s.y, s.z).applyMatrix4(s.grp.matrixWorld);
-      dummy.position.copy(p);
-      dummy.rotation.set(0, s.grp.rotation.y, 0);
-      dummy.updateMatrix();
-      crowd.setMatrixAt(i, dummy.matrix);
-      color.set(palette[Math.floor(Math.random() * palette.length)]).multiplyScalar(0.3 + Math.random() * 0.35);
-      crowd.setColorAt(i, color);
-      s.base = p.y; s.phase = Math.random() * 10;
-      s.world = p; s.rot = s.grp.rotation.y;
+      dummy.position.copy(p); dummy.rotation.set(0, s.grp.rotation.y + (Math.random() - 0.5) * 0.3, 0);
+      const sc = 0.92 + Math.random() * 0.16; dummy.scale.set(sc, sc, sc);
+      dummy.updateMatrix(); crowd.setMatrixAt(i, dummy.matrix);
+      aPhase[i] = Math.random(); aSkin[i] = Math.random() * Math.random();
+      crowd.setColorAt(i, color.set('#888'));
     });
     scene.add(crowd);
+    const palette = ['#e0e0e0', '#222', '#3a3f4a', '#7a6a55', '#2f4f7a', '#8a2a2a'];
     out.crowd = {
-      mesh: crowd, seats, excite: 0,
-      update(t) {
-        if (this.excite < 0.02 && this._still) return;
-        this._still = this.excite < 0.02;
+      mesh: crowd, seats, excite: 0, cheer: -1,
+      // 경기 시작 때: 두 팀 유니폼 색으로 응원석을 나눔 (뒤 관중석은 섞이고, 양옆은 한 팀씩 많이)
+      setTeams(colA, colB) {
         seats.forEach((s, i) => {
-          const j = Math.max(0, Math.sin(t * 11 + s.phase)) * 0.35 * this.excite;
-          dummy.position.set(s.world.x, s.base + j, s.world.z);
-          dummy.rotation.set(0, s.rot, 0);
-          dummy.updateMatrix();
-          crowd.setMatrixAt(i, dummy.matrix);
+          s.grp.updateMatrixWorld();
+          const wx = new THREE.Vector3(s.x, 0, 0).applyMatrix4(s.grp.matrixWorld).x;
+          const pA = 0.5 + THREE.MathUtils.clamp(-wx / 40, -0.38, 0.38); // 왼쪽(−x)은 A 팀 쪽
+          const r = Math.random(); const team = r < 0.1 ? 2 : (Math.random() < pA ? 0 : 1);
+          aTeam[i] = team;
+          const base = team === 0 ? colA[Math.random() < 0.75 ? 0 : 1] : team === 1 ? colB[Math.random() < 0.75 ? 0 : 1] : palette[(Math.random() * palette.length) | 0];
+          // 지붕 그늘 아래라 조금 어둡게 + 사람마다 밝기 차이
+          color.set(base).convertSRGBToLinear().multiplyScalar(0.35 + Math.random() * 0.35);
+          crowd.setColorAt(i, color);
         });
-        crowd.instanceMatrix.needsUpdate = true;
+        crowd.geometry.attributes.aTeam.needsUpdate = true;
+        crowd.instanceColor.needsUpdate = true;
+      },
+      update(t) {
+        U.uTime.value = t;
+        // 흥분은 천천히 가라앉음
+        this._ex = this._ex === undefined ? 0 : this._ex + (this.excite - this._ex) * Math.min(1, (this._dt || 0.016) * 4);
+        U.uExcite.value = this._ex; U.uCheer.value = this.cheer;
       },
     };
 
     // ---------- 조명탑 ----------
-    const towerM = new THREE.MeshStandardMaterial({ color: '#555b66' });
-    const lampM = new THREE.MeshBasicMaterial({ color: '#fffbe0' });
-    [[-30, -10], [30, -10], [-30, 40], [30, 40]].forEach(([x, z]) => {
-      const t = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.5, 30, 8), towerM);
-      t.position.set(x, 15, z); scene.add(t);
-      const l = new THREE.Mesh(new THREE.BoxGeometry(4, 2, 0.4), lampM);
-      l.position.set(x, 30, z); l.lookAt(0, 0, 10); scene.add(l);
+    // 기둥 + 램프 격자(빛나는 면) + 은은한 빛 번짐(더하기 합성)
+    const towerM = new THREE.MeshStandardMaterial({ color: '#5a616c', roughness: 0.5, metalness: 0.5 });
+    const lampCv = document.createElement('canvas'); lampCv.width = 128; lampCv.height = 64;
+    const lc = lampCv.getContext('2d'); lc.fillStyle = '#20242c'; lc.fillRect(0, 0, 128, 64);
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 8; x++) { const gr = lc.createRadialGradient(8 + x * 16, 8 + y * 16, 0, 8 + x * 16, 8 + y * 16, 7); gr.addColorStop(0, '#ffffff'); gr.addColorStop(0.6, '#fff4cf'); gr.addColorStop(1, '#5a5a48'); lc.fillStyle = gr; lc.fillRect(x * 16 + 1, y * 16 + 1, 14, 14); }
+    const lampM = new THREE.MeshBasicMaterial({ map: PK.canvasTex(lampCv) });
+    const glowCv = document.createElement('canvas'); glowCv.width = glowCv.height = 128;
+    const gg = glowCv.getContext('2d'); const ggr = gg.createRadialGradient(64, 64, 0, 64, 64, 64);
+    ggr.addColorStop(0, 'rgba(255,250,225,0.9)'); ggr.addColorStop(0.25, 'rgba(255,240,200,0.35)'); ggr.addColorStop(1, 'rgba(255,240,200,0)');
+    gg.fillStyle = ggr; gg.fillRect(0, 0, 128, 128);
+    const glowM = new THREE.SpriteMaterial({ map: PK.canvasTex(glowCv), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, fog: false });
+    [[-31, -12], [31, -12], [-31, 42], [31, 42]].forEach(([x, z]) => {
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.6, 32, 10), towerM); t.position.set(x, 16, z); scene.add(t);
+      const head = new THREE.Group(); head.position.set(x, 32.5, z); head.lookAt(0, 0, 10); scene.add(head);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(6.4, 3.4, 0.3), towerM); frame.position.z = -0.12; head.add(frame);
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(6, 3), lampM); panel.position.z = 0.04; head.add(panel);
+      const glow = new THREE.Sprite(glowM); glow.scale.set(16, 16, 1); glow.position.set(x * 0.98, 32.5, z + (z < 0 ? 0.6 : -0.6)); scene.add(glow);
     });
 
     // ---------- 공 ----------

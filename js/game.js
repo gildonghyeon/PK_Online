@@ -241,6 +241,11 @@ PK.Game = (function () {
       return { kicker, keeper };
     });
 
+    // 관중석을 두 팀 유니폼 색으로 나눔
+    if (S.crowd.setTeams) {
+      const colsOf = (t) => { const u = PK.Options.uniform[t.cfg.uniform]; return [u.c1, u.c2]; };
+      S.crowd.setTeams(colsOf(st.teams[0]), colsOf(st.teams[1]));
+    }
     show('hud', true);
     buildScoreboard();
     hideKickUI();
@@ -1665,7 +1670,9 @@ PK.Game = (function () {
     logShot(cls, text);
     updateScoreboard();
 
-    if (goal) { PK.Audio.cheer(); S.crowd.excite = 1; } else { PK.Audio.groan(); S.crowd.excite = 0.4; }
+    // 관중: 골이면 차는 팀 응원석이, 막히거나 빗나가면 키퍼 팀 응원석이 일어나 환호 (반대쪽은 머리를 감쌈)
+    S.crowd.cheer = goal ? st.kickerTeam : st.keeperTeam;
+    if (goal) { PK.Audio.cheer(); S.crowd.excite = 1; } else { PK.Audio.groan(); S.crowd.excite = cls === 'save' ? 0.85 : 0.6; }
     st.Kk.react = { t0: st.time, good: goal };
     if (cls === 'save') st.K.celebrate = { t0: st.time + 0.6 }; // 잠시 후 일어나서 환호
     // 리플레이 느낌의 카메라
@@ -1766,7 +1773,8 @@ PK.Game = (function () {
     setText('result-score', `${goals(0)} : ${goals(1)}`);
     renderShotMap();
     show('result', true);
-    if (humanWin) { PK.Audio.cheer(); S.crowd.excite = 1; }
+    if (humanWin) PK.Audio.cheer();
+    S.crowd.cheer = w; S.crowd.excite = 1; // 이긴 팀 응원석이 일어나 환호, 진 팀은 아쉬워함
     // 승자 키커 세리머니
     st.avatars.forEach((a, i) => { a.kicker.visible = i === w; a.keeper.visible = false; });
     const av = st.avatars[w].kicker;
@@ -1894,8 +1902,9 @@ PK.Game = (function () {
     if (st.state === 'flight' || (st.flight && st.state === 'result')) flightUpdate(dt);
 
     S.net.update(dt);
-    S.crowd.update(st.time);
+    S.crowd._dt = dt; S.crowd.update(st.time);
     S.adTex.offset.x = (st.time * 0.03) % 1;
+    if (S.leds) S.leds.forEach((t) => { t.offset.x = (-st.time * 0.05) % 1; }); // 관중석 앞 LED 광고가 흘러감
 
     // 카메라 보간
     const c = st.cam;
