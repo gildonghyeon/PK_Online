@@ -299,7 +299,7 @@ PK.PlayerModel = (function () {
     const U = {
       uKind: { value: kind },
       uSkinTint: { value: k.skinTint }, uHair: { value: k.hair }, uHairLum: { value: hairLum },
-      uShirt: { value: k.shirtMap }, uSleeve: { value: k.sleeve }, uTrim: { value: k.trim },
+      uShirt: { value: k.shirtMap }, uDecal: { value: k.shirtMap && k.shirtMap.pkDecal ? k.shirtMap.pkDecal : k.shirtMap }, uSleeve: { value: k.sleeve }, uTrim: { value: k.trim },
       uShorts: { value: k.shorts }, uStripe: { value: k.stripe }, uSocks: { value: k.socks }, uSockBand: { value: k.sockBand },
       uBoot: { value: k.boot }, uSole: { value: k.sole }, uGlove: { value: k.glove }, uKeeper: { value: k.longSleeve ? 1 : 0 },
       uHem: { value: kitDims.hem }, uShoulder: { value: kitDims.shoulder }, uSockTop: { value: kitDims.sockTop },
@@ -321,7 +321,7 @@ PK.PlayerModel = (function () {
         .replace('#include <common>', `#include <common>
 varying vec3 vBind; varying float vPart; varying float vWall;
 uniform float uKind; uniform vec3 uSkinTint; uniform vec3 uHair; uniform float uHairLum;
-uniform sampler2D uShirt; uniform vec3 uSleeve; uniform vec3 uTrim; uniform vec3 uShorts; uniform vec3 uStripe;
+uniform sampler2D uShirt; uniform sampler2D uDecal; uniform vec3 uSleeve; uniform vec3 uTrim; uniform vec3 uShorts; uniform vec3 uStripe;
 uniform vec3 uSocks; uniform vec3 uSockBand; uniform vec3 uBoot; uniform vec3 uSole; uniform vec3 uGlove; uniform float uKeeper;
 uniform float uHem; uniform float uShoulder; uniform float uSockTop; uniform float uNeck; uniform vec4 uNeckFB; uniform float uShortsHem; uniform float uHipZ; uniform vec3 uArm; uniform float uSleevePat; uniform vec3 uSleeve2; uniform float uArmLine; uniform vec3 uMouth; uniform float uModelScale; uniform vec2 uNearFar; uniform float uShout; uniform vec3 uMouthView; uniform vec3 uNose; uniform vec3 uEye; varying vec3 vMouthL;
 float segDist(vec2 p, vec2 a, vec2 b) { vec2 ab = b - a; float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0); return length(p - a - ab * t); }`)
@@ -336,7 +336,7 @@ float shade = pow(clamp(lum / 0.82, 0.72, 1.06), 2.2);   // 천의 주름·음�
 #ifdef USE_MAP
 if (uKind < 1.5) { // 셔츠: 원래 텍스처의 인쇄 그림이 비치지 않게 흐리게 읽어 큰 주름만 남김
   vec3 tb = pow(max(mapTexelToLinear(texture2D(map, vUv, 3.5)).rgb, vec3(0.0)), vec3(1.0 / 2.2));
-  shade = pow(clamp(dot(tb, vec3(0.299, 0.587, 0.114)) / 0.82, 0.78, 1.05), 2.2);
+  shade = pow(clamp(dot(tb, vec3(0.299, 0.587, 0.114)) / 0.82, 0.9, 1.03), 2.2); // 원래 등번호(7) 같은 큰 인쇄도 거의 안 보이게 범위를 좁힘
 }
 #endif
 vec3 col = tex;
@@ -345,6 +345,14 @@ if (uKind < 1.5) {                       // 셔츠: 몸통은 무늬 그림, 팔
   bool arm = abs(b.x) > uArm.z + 0.004 && b.y > uHem + 0.25;
   vec2 kitUv = vec2(fract(atan(b.x, b.z + 0.01) / 6.2831853 + 1.0), clamp((b.y - uHem) / (uShoulder - uHem), 0.0, 1.0));
   vec3 c = arm ? uSleeve : sRGBToLinear(texture2D(uShirt, kitUv)).rgb;
+  if (!arm) { // 번호·글자·엠블럼: 앞·뒤에서 평평하게 비춰 찍음 (몸 앞뒤 가운데 기준, 가로 1px = 1mm)
+    bool backSide = b.z < uHipZ;
+    float dx = backSide ? -b.x : b.x;
+    vec2 duv = vec2((backSide ? 0.5 : 0.0) + clamp(dx / 0.512 + 0.5, 0.0, 1.0) * 0.5, kitUv.y);
+    vec4 dk = texture2D(uDecal, duv);
+    float dA = dk.a * (1.0 - smoothstep(0.15, 0.2, abs(dx)));
+    c = mix(c, sRGBToLinear(vec4(dk.rgb, 1.0)).rgb, dA);
+  }
   if (arm) {
     float ax = abs(b.x);
     // 소매도 몸통 무늬를 따름: 가로 띠(후프)는 팔을 두르는 띠, 하프는 오른쪽 소매가 다른 색
@@ -488,35 +496,43 @@ diffuseColor.rgb = col;`)
     const numFill = darkInk ? '#141414' : '#ffffff';
     const numEdge = busy ? (darkInk ? '#ffffff' : shadeHex(darker, -0.45)) : (darkInk ? 'rgba(255,255,255,.55)' : 'rgba(0,0,0,.35)');
     const edgeW = busy ? 2.2 : 1;
+    // ---- 번호·글자·엠블럼: 몸통을 감싸는 무늬와 따로, 앞·뒤에서 평평하게 비춰 찍는 그림 (실제 유니폼 프린트처럼) ----
+    //  몸통 둘레 각도로 감싸면 등 가운데에서 가로가 줄고 옆으로 갈수록 휘어 번호가 등 안쪽으로 말려 보임
+    //  캔버스 왼쪽 절반 = 앞면(가로 1px = 1mm, 가운데 = 몸 가운데), 오른쪽 절반 = 뒷면. 세로는 무늬와 같음 (밑단 → 어깨)
+    const dc = document.createElement('canvas'); dc.width = 1024; dc.height = 512;
+    const d = dc.getContext('2d');
+    const FX = (xm) => 256 + xm * 1000, BX = 768; // 앞면: 몸의 x(m) → 캔버스 x / 뒷면 가운데
     // 엠블럼 (선수 왼쪽 가슴): 방패 + 별
-    const crest = (cx, cy, s) => {
-      g.save(); g.translate(cx, cy); g.scale(s, s);
-      g.beginPath(); g.moveTo(-20, -24); g.lineTo(20, -24); g.lineTo(20, 4); g.quadraticCurveTo(20, 20, 0, 28); g.quadraticCurveTo(-20, 20, -20, 4); g.closePath();
-      g.fillStyle = c2; g.fill(); g.lineWidth = 3; g.strokeStyle = numFill; g.stroke();
-      g.fillStyle = numFill; g.beginPath();
-      for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 4.5 : 10; g.lineTo(Math.cos(a) * r, Math.sin(a) * r - 2); }
-      g.closePath(); g.fill();
-      g.restore();
+    const crest = (cx, cy, sc) => {
+      d.save(); d.translate(cx, cy); d.scale(sc, sc);
+      d.beginPath(); d.moveTo(-20, -24); d.lineTo(20, -24); d.lineTo(20, 4); d.quadraticCurveTo(20, 20, 0, 28); d.quadraticCurveTo(-20, 20, -20, 4); d.closePath();
+      d.fillStyle = c2; d.fill(); d.lineWidth = 3; d.strokeStyle = numFill; d.stroke();
+      d.fillStyle = numFill; d.beginPath();
+      for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + (i * Math.PI) / 5, r = i % 2 ? 4.5 : 10; d.lineTo(Math.cos(a) * r, Math.sin(a) * r - 2); }
+      d.closePath(); d.fill();
+      d.restore();
     };
-    crest(U(0.09), V(0.74), 1.15);
+    crest(FX(0.072), V(0.74), 1.0);
     // 오른쪽 가슴: 단순한 제조사 마크 (사선 두 줄)
-    g.fillStyle = numFill;
-    front(() => { g.save(); g.translate(U(-0.09), V(0.75)); g.rotate(-0.5); g.fillRect(-13, -8, 26, 5); g.fillRect(-13, 3, 26, 5); g.restore(); });
-    g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 5 * edgeW; g.lineJoin = 'round'; g.strokeStyle = numEdge; g.fillStyle = numFill;
+    d.fillStyle = numFill;
+    d.save(); d.translate(FX(-0.072), V(0.75)); d.rotate(-0.5); d.fillRect(-11, -7, 22, 4.5); d.fillRect(-11, 2.5, 22, 4.5); d.restore();
+    d.textAlign = 'center'; d.textBaseline = 'middle'; d.lineJoin = 'round';
+    d.lineWidth = 5 * edgeW; d.strokeStyle = numEdge; d.fillStyle = numFill;
     // 가슴 가운데 스폰서 글자 (가상의 대회 이름)
-    g.font = 'italic 900 40px "Arial Black", "Noto Sans KR", Arial, sans-serif';
-    front(() => { g.save(); g.translate(0, V(0.55)); g.scale(1, 1.15); g.strokeText('PK ONLINE', 0, 0); g.fillText('PK ONLINE', 0, 0); g.restore(); });
+    d.font = 'italic 900 30px "Arial Black", "Noto Sans KR", Arial, sans-serif';
+    d.save(); d.translate(FX(0), V(0.55)); d.scale(1, 1.25); d.strokeText('PK ONLINE', 0, 0); d.fillText('PK ONLINE', 0, 0); d.restore();
     // 앞 번호 (스폰서 아래, 작게)
-    g.font = '900 46px "Arial Black", "Noto Sans KR", Arial, sans-serif';
-    front(() => { g.strokeText(String(number), 0, V(0.4)); g.fillText(String(number), 0, V(0.4)); });
+    d.font = '900 40px "Arial Black", "Noto Sans KR", Arial, sans-serif';
+    d.strokeText(String(number), FX(0), V(0.4)); d.fillText(String(number), FX(0), V(0.4));
     // 등번호 (등 위쪽, 크게) + 위에 작은 대회 글자
-    g.font = '900 200px "Arial Black", "Noto Sans KR", Arial, sans-serif';
-    g.lineWidth = 10 * edgeW;
-    g.strokeText(String(number), U(0.5), V(0.5)); g.fillText(String(number), U(0.5), V(0.5));
-    g.font = '900 30px "Arial Black", "Noto Sans KR", Arial, sans-serif'; g.lineWidth = 4 * edgeW;
-    g.strokeText('PK ONLINE', U(0.5), V(0.86)); g.fillText('PK ONLINE', U(0.5), V(0.86));
+    d.font = '900 175px "Arial Black", "Noto Sans KR", Arial, sans-serif';
+    d.lineWidth = 10 * edgeW;
+    d.save(); d.translate(BX, V(0.57)); d.scale(0.86, 1); d.strokeText(String(number), 0, 0); d.fillText(String(number), 0, 0); d.restore();
+    d.font = '900 26px "Arial Black", "Noto Sans KR", Arial, sans-serif'; d.lineWidth = 4 * edgeW;
+    d.strokeText('PK ONLINE', BX, V(0.86)); d.fillText('PK ONLINE', BX, V(0.86));
     const tex = PK.canvasTex(cv);
+    const decalTex = PK.canvasTex(dc); decalTex.anisotropy = 8; decalTex.generateMipmaps = false; decalTex.minFilter = THREE.LinearFilter;
+    tex.pkDecal = decalTex; // (r128 텍스처에는 userData 가 없음)
     tex.anisotropy = 8;
     tex.wrapS = THREE.RepeatWrapping;
     return tex;
