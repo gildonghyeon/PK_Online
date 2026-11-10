@@ -127,7 +127,7 @@ PK.PlayerModel = (function () {
     return KIND.body;
   };
   const meshKind = {};   // 메시 이름 → 종류
-  const kitDims = { hem: 0.9, shoulder: 1.45, sockTop: 0.45 }; // 셔츠 밑단·어깨 높이, 양말 윗단 높이 (기본 자세, m)
+  const kitDims = { hem: 0.9, shoulder: 1.45, sockTop: 0.45, neck: 1.5, neckF: [1.565, 0.06], neckB: [1.595, -0.057], shortsHem: 0.6, armY: 1.42, armZ: 0, armX: 0.18, hipZ: 0 }; // 셔츠 밑단·어깨·목둘레 높이, 반바지 밑단, 양말 윗단, 팔 중심선 (기본 자세, m)
   // ---------- 몸 비율 다듬기 (프로 축구선수 체형: 긴 다리, 작은 머리, 가는 허리 → 넓은 어깨) ----------
   //  뼈마다 (가로 x, 세로 y, 앞뒤 z) 배율. 기본 자세(T자)에서 그 뼈를 따르는 살을 뼈 위치를 중심으로 늘이고 줄인 뒤,
   //  자식 관절도 그만큼 옮기고, 그 모양을 새 기본 자세로 다시 묶음 (동작은 관절 회전이라 그대로 맞음)
@@ -202,7 +202,8 @@ PK.PlayerModel = (function () {
     reproportion(base.scene, rigify(base.scene));
     base.scene.updateMatrixWorld(true);
     const v = V3();
-    let shirtMinY = 9, sockTop = 0;
+    let shirtMinY = 9, sockTop = 0, neckY = 0, shortsMinY = 9;
+    const neckF = [0, 0], neckB = [0, 0];
     base.scene.traverse((o) => {
       if (!o.isSkinnedMesh) return;
       const kind = kindOf(o.name); meshKind[o.name] = kind;
@@ -218,6 +219,12 @@ PK.PlayerModel = (function () {
         part[i] = PART_OF(o.skeleton.bones[I(i, bk)].name);
         if (kind === KIND.shirt && part[i] !== 2 && part[i] !== 3) shirtMinY = Math.min(shirtMinY, v.y);
         if (kind === KIND.socks) sockTop = Math.max(sockTop, v.y);
+        if (kind === KIND.shirt && part[i] !== 2 && part[i] !== 3 && Math.abs(v.x) < 0.09) neckY = Math.max(neckY, v.y);
+        if (kind === KIND.shirt && part[i] !== 2 && part[i] !== 3 && Math.abs(v.x) < 0.012) { // 목둘레 앞·뒤 가장 높은 점
+          if (v.z > 0 && v.y > neckF[0]) { neckF[0] = v.y; neckF[1] = v.z; }
+          if (v.z < 0 && v.y > neckB[0]) { neckB[0] = v.y; neckB[1] = v.z; }
+        }
+        if (kind === KIND.shorts) shortsMinY = Math.min(shortsMinY, v.y);
       }
       g.setAttribute('aBind', new THREE.BufferAttribute(bind, 3));
       g.setAttribute('aPart', new THREE.BufferAttribute(part, 1));
@@ -228,7 +235,11 @@ PK.PlayerModel = (function () {
     const B = {}; base.scene.traverse((o) => { if (o.isBone) B[o.name] = o; });
     if (shirtMinY < 9) kitDims.hem = shirtMinY;
     if (sockTop > 0) kitDims.sockTop = sockTop;
-    if (B.upperarm_l) kitDims.shoulder = B.upperarm_l.getWorldPosition(V3()).y + 0.03;
+    if (B.upperarm_l) { const ua = B.upperarm_l.getWorldPosition(V3()); kitDims.shoulder = ua.y + 0.03; kitDims.armY = ua.y; kitDims.armZ = ua.z; kitDims.armX = Math.abs(ua.x); }
+    if (B.pelvis) kitDims.hipZ = B.pelvis.getWorldPosition(V3()).z;
+    if (neckY > 0) kitDims.neck = neckY;
+    if (neckF[0] > 0 && neckB[0] > 0) { kitDims.neckF = neckF; kitDims.neckB = neckB; }
+    if (shortsMinY < 9) kitDims.shortsHem = shortsMinY;
 
     // 피부 텍스처 평균 (피부색 맞추기용) · 머리카락 평균 밝기
     const avgOf = (img, pick) => {
@@ -292,6 +303,8 @@ PK.PlayerModel = (function () {
       uShorts: { value: k.shorts }, uStripe: { value: k.stripe }, uSocks: { value: k.socks }, uSockBand: { value: k.sockBand },
       uBoot: { value: k.boot }, uSole: { value: k.sole }, uGlove: { value: k.glove }, uKeeper: { value: k.longSleeve ? 1 : 0 },
       uHem: { value: kitDims.hem }, uShoulder: { value: kitDims.shoulder }, uSockTop: { value: kitDims.sockTop },
+      uNeck: { value: kitDims.neck }, uNeckFB: { value: new THREE.Vector4(kitDims.neckF[0], kitDims.neckF[1], kitDims.neckB[0], kitDims.neckB[1]) }, uShortsHem: { value: kitDims.shortsHem }, uHipZ: { value: kitDims.hipZ }, uArm: { value: new THREE.Vector3(kitDims.armY, kitDims.armZ, kitDims.armX) },
+      uSleevePat: { value: k.sleevePat || 0 }, uSleeve2: { value: k.sleeve2 || k.sleeve }, uArmLine: { value: k.armLine || 0 },
       uMouth: { value: faceInfo ? faceInfo.mouth : new THREE.Vector3(0, -9, 0) }, uModelScale: { value: MS },
       uNearFar: { value: new THREE.Vector2(0.1, 300) }, // 지금 카메라의 near·far (입속 깊이 밀기용, 그릴 때마다 갱신)
       uShout: { value: 0 }, uMouthView: { value: new THREE.Vector3() }, // 함성 정도 · 입속 가운데(카메라 좌표, 그릴 때마다 갱신)
@@ -310,7 +323,7 @@ varying vec3 vBind; varying float vPart; varying float vWall;
 uniform float uKind; uniform vec3 uSkinTint; uniform vec3 uHair; uniform float uHairLum;
 uniform sampler2D uShirt; uniform vec3 uSleeve; uniform vec3 uTrim; uniform vec3 uShorts; uniform vec3 uStripe;
 uniform vec3 uSocks; uniform vec3 uSockBand; uniform vec3 uBoot; uniform vec3 uSole; uniform vec3 uGlove; uniform float uKeeper;
-uniform float uHem; uniform float uShoulder; uniform float uSockTop; uniform vec3 uMouth; uniform float uModelScale; uniform vec2 uNearFar; uniform float uShout; uniform vec3 uMouthView; uniform vec3 uNose; uniform vec3 uEye; varying vec3 vMouthL;
+uniform float uHem; uniform float uShoulder; uniform float uSockTop; uniform float uNeck; uniform vec4 uNeckFB; uniform float uShortsHem; uniform float uHipZ; uniform vec3 uArm; uniform float uSleevePat; uniform vec3 uSleeve2; uniform float uArmLine; uniform vec3 uMouth; uniform float uModelScale; uniform vec2 uNearFar; uniform float uShout; uniform vec3 uMouthView; uniform vec3 uNose; uniform vec3 uEye; varying vec3 vMouthL;
 float segDist(vec2 p, vec2 a, vec2 b) { vec2 ab = b - a; float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0); return length(p - a - ab * t); }`)
         .replace('#include <map_fragment>', `#include <map_fragment>
 gl_FragDepthEXT = gl_FragCoord.z;
@@ -320,19 +333,44 @@ vec3 s = pow(max(tex, vec3(0.0)), vec3(1.0 / 2.2));
 float lum = dot(s, vec3(0.299, 0.587, 0.114));
 vec3 b = vBind;
 float shade = pow(clamp(lum / 0.82, 0.72, 1.06), 2.2);   // 천의 주름·음영 (원래 인쇄는 거의 안 보이게 범위를 좁힘)
+#ifdef USE_MAP
+if (uKind < 1.5) { // 셔츠: 원래 텍스처의 인쇄 그림이 비치지 않게 흐리게 읽어 큰 주름만 남김
+  vec3 tb = pow(max(mapTexelToLinear(texture2D(map, vUv, 3.5)).rgb, vec3(0.0)), vec3(1.0 / 2.2));
+  shade = pow(clamp(dot(tb, vec3(0.299, 0.587, 0.114)) / 0.82, 0.78, 1.05), 2.2);
+}
+#endif
 vec3 col = tex;
 if (uKind < 1.5) {                       // 셔츠: 몸통은 무늬 그림, 팔은 소매 색, 손목 끝동·목 칼라는 테두리 색
-  bool arm = vPart > 1.5 && vPart < 3.5;
+  // 소매·몸통 경계: 정점별 부위로 나누면 삼각형을 따라 지그재그가 생겨, 어깨 관절 위치의 곧은 선으로 나눔 (T자 기본 자세)
+  bool arm = abs(b.x) > uArm.z + 0.004 && b.y > uHem + 0.25;
   vec2 kitUv = vec2(fract(atan(b.x, b.z + 0.01) / 6.2831853 + 1.0), clamp((b.y - uHem) / (uShoulder - uHem), 0.0, 1.0));
   vec3 c = arm ? uSleeve : sRGBToLinear(texture2D(uShirt, kitUv)).rgb;
-  if (arm && abs(b.x) > 0.62) c = uTrim;                       // 손목 끝동 (T자 기본 자세에서 팔 끝 쪽)
-  if (!arm && b.y > uShoulder + 0.07 && abs(b.x) < 0.1) c = uTrim; // 목 칼라
+  if (arm) {
+    float ax = abs(b.x);
+    // 소매도 몸통 무늬를 따름: 가로 띠(후프)는 팔을 두르는 띠, 하프는 오른쪽 소매가 다른 색
+    if (uSleevePat > 0.5 && uSleevePat < 1.5 && fract((ax - 0.2) / 0.11) < 0.5) c = uSleeve2;
+    if (uSleevePat > 1.5 && uSleevePat < 2.5 && b.x < 0.0) c = uSleeve2;
+    // 어깨선 띠: 목에서 손목까지 소매 윗면을 따라 가는 줄 (팔 중심선 기준 각도로 윗면만)
+    float ang = atan(b.y - uArm.x, b.z - uArm.y);
+    if (uArmLine > 0.5 && abs(ang - 1.5708) < 0.2 && ax < 0.6) c = uTrim;
+    if (ax > 0.62) c = uTrim;                                    // 손목 끝동 (T자 기본 자세에서 팔 끝 쪽)
+  }
+  // 목 칼라: 목둘레는 앞이 낮고 뒤가 높게 기울어 있음 → 앞뒤 높이를 이은 선에서 1.6cm 아래까지 테두리 색
+  float neckEdge = mix(uNeckFB.z, uNeckFB.x, clamp((b.z - uNeckFB.w) / (uNeckFB.y - uNeckFB.w), 0.0, 1.0));
+  if (!arm && abs(b.x) < 0.13 && b.y > neckEdge - 0.016) c = uTrim;
   col = c * shade;
 } else if (uKind < 2.5) {                // 반바지: 바깥 옆선 줄무늬
-  float side = smoothstep(0.86, 0.95, abs(b.x) / max(0.001, length(b.xz)));
-  col = mix(uShorts, uStripe, side * step(0.0, b.y)) * shade;
+  // 옆선: 골반 중심에서 본 방향이 옆쪽인 곳 (중심이 앞뒤로 어긋나면 뒤쪽이 넓게 칠해짐)
+  vec2 hq = vec2(b.x, b.z - uHipZ);
+  float side = smoothstep(0.9, 0.96, abs(hq.x) / max(0.001, length(hq)));
+  vec3 sc = mix(uShorts, uStripe, side * step(0.0, b.y));
+  if (b.y < uShortsHem + 0.016) sc = uStripe;                   // 밑단 마감 띠
+  col = sc * shade;
 } else if (uKind < 3.5) {                // 양말: 윗단 띠
-  col = (b.y > uSockTop - 0.035 ? uSockBand : uSocks) * shade;
+  // 양말 윗단: 굵은 띠 + 아래 가는 띠
+  float sy = uSockTop - b.y;
+  bool band = sy < 0.022 || (sy > 0.03 && sy < 0.038);
+  col = (band ? uSockBand : uSocks) * shade;
 } else if (uKind < 4.5) {                // 축구화: 밑창은 밑창 색
   col = (b.y < 0.022 ? uSole : uBoot) * pow(clamp(lum / 0.7, 0.45, 1.2), 1.6);
 } else if (uKind < 5.5) {                // 몸(피부·얼굴·눈): 피부만 원하는 색으로, 키퍼는 손에 장갑
@@ -443,8 +481,13 @@ diffuseColor.rgb = col;`)
     for (let x = 0; x < W; x += 4) g.fillRect(x, 0, 1, H);
     g.globalAlpha = 1;
 
-    const numFill = lum(c1) > 0.55 ? '#141414' : '#ffffff';
-    const numEdge = lum(c1) > 0.55 ? 'rgba(255,255,255,.55)' : 'rgba(0,0,0,.35)';
+    // 글자 색: 무늬가 있으면 두 색 위 어디서나 읽히게 굵은 테두리를 둠 (밝은 바탕엔 진한 글자, 어두우면 흰 글자)
+    const busy = p === 'stripes' || p === 'hoops' || p === 'sash' || p === 'halves';
+    const avgL = busy ? (lum(c1) + lum(c2)) / 2 : lum(c1);
+    const darkInk = avgL > 0.55, darker = lum(c1) < lum(c2) ? c1 : c2;
+    const numFill = darkInk ? '#141414' : '#ffffff';
+    const numEdge = busy ? (darkInk ? '#ffffff' : shadeHex(darker, -0.45)) : (darkInk ? 'rgba(255,255,255,.55)' : 'rgba(0,0,0,.35)');
+    const edgeW = busy ? 2.2 : 1;
     // 엠블럼 (선수 왼쪽 가슴): 방패 + 별
     const crest = (cx, cy, s) => {
       g.save(); g.translate(cx, cy); g.scale(s, s);
@@ -460,7 +503,7 @@ diffuseColor.rgb = col;`)
     g.fillStyle = numFill;
     front(() => { g.save(); g.translate(U(-0.09), V(0.75)); g.rotate(-0.5); g.fillRect(-13, -8, 26, 5); g.fillRect(-13, 3, 26, 5); g.restore(); });
     g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineWidth = 5; g.strokeStyle = numEdge; g.fillStyle = numFill;
+    g.lineWidth = 5 * edgeW; g.lineJoin = 'round'; g.strokeStyle = numEdge; g.fillStyle = numFill;
     // 가슴 가운데 스폰서 글자 (가상의 대회 이름)
     g.font = 'italic 900 40px "Arial Black", "Noto Sans KR", Arial, sans-serif';
     front(() => { g.save(); g.translate(0, V(0.55)); g.scale(1, 1.15); g.strokeText('PK ONLINE', 0, 0); g.fillText('PK ONLINE', 0, 0); g.restore(); });
@@ -469,9 +512,9 @@ diffuseColor.rgb = col;`)
     front(() => { g.strokeText(String(number), 0, V(0.4)); g.fillText(String(number), 0, V(0.4)); });
     // 등번호 (등 위쪽, 크게) + 위에 작은 대회 글자
     g.font = '900 200px "Arial Black", "Noto Sans KR", Arial, sans-serif';
-    g.lineWidth = 10;
+    g.lineWidth = 10 * edgeW;
     g.strokeText(String(number), U(0.5), V(0.5)); g.fillText(String(number), U(0.5), V(0.5));
-    g.font = '900 30px "Arial Black", "Noto Sans KR", Arial, sans-serif'; g.lineWidth = 4;
+    g.font = '900 30px "Arial Black", "Noto Sans KR", Arial, sans-serif'; g.lineWidth = 4 * edgeW;
     g.strokeText('PK ONLINE', U(0.5), V(0.86)); g.fillText('PK ONLINE', U(0.5), V(0.86));
     const tex = PK.canvasTex(cv);
     tex.anisotropy = 8;
@@ -536,6 +579,10 @@ diffuseColor.rgb = col;`)
       sockBand: lin(keeper ? '#ffffff' : (same(uni.socks, uni.c1) ? uni.c2 : uni.c1)),
       boot: lin(boot.c), sole: lin(boot.s), glove: lin('#f2f2f2'),
       longSleeve: keeper,
+      // 소매 무늬: 1 후프(띠) · 2 하프(오른쪽 소매 다른 색) / 어깨선 띠: 무늬가 단순한 유니폼과 키퍼
+      sleevePat: keeper ? 0 : uni.p === 'hoops' ? 1 : uni.p === 'halves' ? 2 : 0,
+      sleeve2: lin(keeper ? uni.gk : uni.c2),
+      armLine: keeper || uni.p === 'solid' || uni.p === 'chevron' || uni.p === 'sash' ? 1 : 0,
     };
     // 옷 종류마다 재질 하나씩 (셔츠·반바지·양말·축구화·몸·머리카락)
     const mats = {};
