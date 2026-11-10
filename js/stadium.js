@@ -4,6 +4,58 @@ window.PK = window.PK || {};
 
 PK.GOAL = { halfW: 3.66, h: 2.44, postR: 0.06, depth: 2.0, spotZ: 11 };
 
+// 클래식 흑백 축구공: 깎은 정이십면체 (검은 오각형 12 + 흰 육각형 20). 구 UV(정방형)에 그림
+PK.ballTexture = (function () {
+  let tex = null;
+  return function () {
+    if (tex) return tex;
+    const W = 1024, H = 512;
+    const phi = (1 + Math.sqrt(5)) / 2;
+    const V = [];
+    [[0, 1, phi], [0, 1, -phi], [0, -1, phi], [0, -1, -phi]].forEach(([a, b, c]) => { V.push([a, b, c], [b, c, a], [c, a, b]); });
+    const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
+    const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2;
+    const C = []; // 면 중심 [x,y,z, 반지름(rad), 오각형?]
+    V.forEach((v) => C.push([...norm(v), 0, 1]));
+    for (let i = 0; i < 12; i++) for (let j = i + 1; j < 12; j++) for (let k = j + 1; k < 12; k++) {
+      if (Math.abs(d2(V[i], V[j]) - 4) < 1e-6 && Math.abs(d2(V[j], V[k]) - 4) < 1e-6 && Math.abs(d2(V[i], V[k]) - 4) < 1e-6) {
+        C.push([...norm([V[i][0] + V[j][0] + V[k][0], V[i][1] + V[j][1] + V[k][1], V[i][2] + V[j][2] + V[k][2]]), 0, 0]);
+      }
+    }
+    const rH = Math.acos(Math.sqrt(5) / 3) / 2;                    // 육각형 안쪽 반지름 (이웃 육각형 중심 각의 절반)
+    let best = 9; for (let f = 12; f < C.length; f++) best = Math.min(best, Math.acos(Math.min(1, C[0][0] * C[f][0] + C[0][1] * C[f][1] + C[0][2] * C[f][2])));
+    C.forEach((c) => { c[3] = c[4] ? best - rH : rH; });
+
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const g = cv.getContext('2d');
+    const img = g.createImageData(W, H), px = img.data;
+    const seam = 0.012; // 이음매 두께 (rad)
+    for (let y = 0; y < H; y++) {
+      const th = ((y + 0.5) / H) * Math.PI, st = Math.sin(th), ct = Math.cos(th);
+      for (let x = 0; x < W; x++) {
+        const ph = ((x + 0.5) / W) * Math.PI * 2;
+        const dx = -Math.cos(ph) * st, dy = ct, dz = Math.sin(ph) * st; // three.js SphereGeometry 와 같은 방향
+        let b1 = 9, b2 = 9, pent = 0;
+        for (let f = 0; f < C.length; f++) {
+          const c = C[f];
+          const s = Math.acos(Math.max(-1, Math.min(1, dx * c[0] + dy * c[1] + dz * c[2]))) - c[3];
+          if (s < b1) { b2 = b1; b1 = s; pent = c[4]; } else if (s < b2) b2 = s;
+        }
+        const e = (b2 - b1) / 2; // 가장 가까운 이음매까지 각
+        let v = pent ? 22 : 246;
+        if (e < seam) v = pent ? 14 : 150 + 80 * (e / seam);       // 꿰맨 자국: 오목하게 어둡게
+        else if (!pent && e < seam * 3) v = 236 + 10 * ((e - seam) / (seam * 2)); // 육각형 가장자리 살짝 그늘
+        const i = (y * W + x) * 4;
+        px[i] = px[i + 1] = px[i + 2] = v; px[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    tex = PK.canvasTex(cv);
+    tex.anisotropy = 4;
+    return tex;
+  };
+})();
+
 PK.Stadium = (function () {
   function build(scene) {
     const G = PK.GOAL;
@@ -368,21 +420,7 @@ if (vPart > 1.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;`);
     });
 
     // ---------- 공 ----------
-    const bcv = document.createElement('canvas'); bcv.width = 512; bcv.height = 256;
-    const bg = bcv.getContext('2d');
-    bg.fillStyle = '#fafafa'; bg.fillRect(0, 0, 512, 256);
-    for (let i = 0; i < 14; i++) {
-      const x = (i % 7) * 75 + (Math.floor(i / 7) % 2) * 37, y = 64 + Math.floor(i / 7) * 128;
-      bg.fillStyle = i % 3 === 0 ? '#1b1b1b' : '#2a6cf0';
-      bg.beginPath();
-      for (let k = 0; k < 5; k++) {
-        const a = (k / 5) * Math.PI * 2 - Math.PI / 2;
-        bg.lineTo(x + Math.cos(a) * 26, y + Math.sin(a) * 22);
-      }
-      bg.fill();
-    }
-    const ballTex = PK.canvasTex(bcv);
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 28, 20), new THREE.MeshStandardMaterial({ map: ballTex, roughness: 0.45 }));
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.11, 48, 32), new THREE.MeshStandardMaterial({ map: PK.ballTexture(), roughness: 0.38 }));
     ball.castShadow = true;
     scene.add(ball);
     out.ball = ball;

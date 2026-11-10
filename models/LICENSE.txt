@@ -1,15 +1,10 @@
-player.glb, hair.glb
+models/player.glb
+출처: Adobe Mixamo 캐릭터 (Ch38) — https://www.mixamo.com
+라이선스: Mixamo 이용 약관에 따라 게임 안에서 사용 (원본 캐릭터 파일 자체를 따로 배포하지 않음).
+게임용으로 메시를 줄이고(약 3만 5천 삼각형) 텍스처를 2048px WebP로 줄임 (glTF-Transform).
+유니폼·축구화·피부·머리 색은 게임 안에서 다시 칠함. 원본 FBX 파일은 이 저장소에 포함하지 않음.
 
-출처: Quaternius "Universal Base Characters" (Standard 무료 버전)
-https://quaternius.com/packs/universalbasecharacters.html
-라이선스: CC0 1.0 Universal (퍼블릭 도메인) — https://creativecommons.org/publicdomain/zero/1.0/
-모델 제작: Quaternius
-
-게임용으로 텍스처를 1024px WebP로 줄이고 파일을 하나로 합침 (glTF-Transform).
-hair.glb 에는 Hair_Buzzed, Hair_SimpleParted, Hair_Long, Hair_Buns, Hair_Beard 를 합쳐 둠.
-
-models/anims.json: animation clips (Idle_Loop, Sprint_Loop, Jog_Fwd_Loop, Yes, Idle_No_Loop) from
-Quaternius "Universal Animation Library" 1 and 2 - CC0 1.0 (https://quaternius.com)
-models/anims.json also contains clips retargeted from Adobe Mixamo animations
-(PenaltyKick, InstepKick, GkIdle, GkDiveLow, GkDiveHigh, StandUp, GkCatch), used inside this game
-under the Mixamo terms. The original Mixamo files are not included in this repository.
+models/anims.json: animation clips, retargeted to the player.glb skeleton.
+- Idle_Loop, Sprint_Loop, Jog_Fwd_Loop, Yes, Idle_No_Loop: Quaternius "Universal Animation Library" 1 and 2 - CC0 1.0 (https://quaternius.com)
+- PenaltyKick, InstepKick, GkIdle, GkDiveLow, GkDiveHigh, StandUp, GkCatch: retargeted from Adobe Mixamo animations,
+  used inside this game under the Mixamo terms. The original Mixamo files are not included in this repository.

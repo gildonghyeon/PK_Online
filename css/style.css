@@ -62,7 +62,11 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
   background: radial-gradient(circle at 50% 80%, rgba(47, 208, 255, .18), rgba(0,0,0,.3) 70%); border: 1px solid var(--line); }
 #preview { position: absolute; inset: 0; cursor: grab; }
 #preview canvas { display: block; }
-.preview-hint { position: absolute; bottom: 8px; right: 12px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.preview-hint { position: absolute; bottom: 12px; left: 12px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.rot-lock { position: absolute; bottom: 8px; right: 8px; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 700;
+  background: rgba(0,0,0,.45); border: 1px solid var(--line); color: var(--muted); }
+.rot-lock:hover { border-color: var(--accent2); color: var(--accent2); }
+.rot-lock.on { background: var(--accent); border-color: var(--accent); color: #102; }
 .custom-list { display: flex; flex-direction: column; gap: 6px; }
 .custom-row { display: grid; grid-template-columns: 90px 36px 1fr 36px; align-items: center; gap: 6px;
   padding: 7px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); }

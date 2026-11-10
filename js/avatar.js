@@ -8,6 +8,26 @@ PK.canvasTex = function (canvas) {
   return t;
 };
 
+// 편하게 선 자세 (로비·킥 전 대기 공통): 오른발에 체중을 싣고 왼무릎은 살짝 굽힘, 팔꿈치도 조금 굽힘
+//  + 숨쉬기·느린 체중 이동. P = 관절 그룹, t = 초
+PK.relaxedStand = function (P, t) {
+  const br = Math.sin(t * 2.0), sw = Math.sin(t * 0.45);
+  P.hips.position.set(0, 0.955 + br * 0.006, 0);
+  P.hips.rotation.set(0, -0.06, 0.035 + sw * 0.012);
+  P.spine.rotation.set(0.03 + br * 0.015, 0.05, -0.04 - sw * 0.012);
+  P.legL.rotation.set(-0.1, 0, 0.07);
+  P.kneeL.rotation.x = 0.22 + sw * 0.03;
+  P.footL.rotation.set(-0.12, 0.12, 0);
+  P.legR.rotation.set(0.03, 0, -0.06);
+  P.kneeR.rotation.x = 0.06;
+  P.footR.rotation.set(-0.03, -0.1, 0);
+  P.armL.rotation.set(0.04, 0, 0.12 + br * 0.02);
+  P.armR.rotation.set(-0.03, 0, -0.1 - br * 0.02);
+  P.elbowL.rotation.x = -0.22;
+  P.elbowR.rotation.x = -0.3;
+  P.head.rotation.set(-0.03, Math.sin(t * 0.6) * 0.15, 0.04);
+};
+
 PK.Options = {
   hair: ['숏컷', '스파이크', '모히칸', '장발', '아프로', '묶음머리', '삭발'],
   hairColor: [

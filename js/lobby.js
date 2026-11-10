@@ -4,10 +4,9 @@ window.PK = window.PK || {};
 PK.Lobby = (function () {
   const O = PK.Options;
   const ROWS = [
-    { key: 'hair', label: '헤어스타일', name: (i) => O.hair[i], count: () => O.hair.length },
+    // 헤어스타일·표정은 사실적인 선수 모델에서는 바꿀 수 없어 목록에서 뺌 (저장 값은 그대로 둠)
     { key: 'hairColor', label: '머리 색', name: (i) => O.hairColor[i].name, sw: (i) => O.hairColor[i].c, count: () => O.hairColor.length },
     { key: 'skin', label: '피부색', name: (i) => O.skin[i].name, sw: (i) => O.skin[i].c, count: () => O.skin.length },
-    { key: 'face', label: '표정', name: (i) => O.face[i], count: () => O.face.length },
     { key: 'uniform', label: '유니폼', name: (i) => O.uniform[i].name, sw: (i) => O.uniform[i].c1, count: () => O.uniform.length },
     { key: 'boots', label: '축구화', name: (i) => O.boots[i].name, sw: (i) => O.boots[i].c, count: () => O.boots.length },
   ];
@@ -22,7 +21,7 @@ PK.Lobby = (function () {
   ROWS.forEach((r) => profiles.forEach((p, i) => { if (!(p[r.key] >= 0 && p[r.key] < r.count())) p[r.key] = defaults[i][r.key]; }));
 
   let cur = 0, selRow = 0, active = false;
-  let renderer, scene, camera, avatar, pedestal, rotY = -0.4, dragging = false, lastX = 0, t0 = performance.now();
+  let renderer, scene, camera, avatar, pedestal, rotY = -0.4, dragging = false, rotLocked = false, lastX = 0, t0 = performance.now();
   const listEl = document.getElementById('custom-list');
 
   function save() { try { localStorage.setItem('pk_profiles', JSON.stringify(profiles)); } catch (e) { /* 무시 */ } }
@@ -87,10 +86,24 @@ PK.Lobby = (function () {
     const ringM = new THREE.Mesh(new THREE.TorusGeometry(0.79, 0.012, 8, 60), new THREE.MeshBasicMaterial({ color: '#c6ff3d' }));
     ringM.rotation.x = Math.PI / 2; ringM.position.y = 0.002;
     scene.add(ringM);
-    const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.11, 20, 14), new THREE.MeshStandardMaterial({ color: '#f5f5f5', roughness: 0.5 }));
+    const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(0.11, 48, 32), new THREE.MeshStandardMaterial({ map: PK.ballTexture(), roughness: 0.38 }));
     ballMesh.position.set(0.42, 0.11, 0.25); ballMesh.castShadow = true;
     scene.add(ballMesh);
 
+    // 자동 회전 고정 버튼 (선택은 이 브라우저에 기억)
+    const lockBtn = document.getElementById('rot-lock');
+    try { rotLocked = localStorage.getItem('pk_rotlock') === '1'; } catch (e) { /* 무시 */ }
+    const paintLock = () => {
+      lockBtn.classList.toggle('on', rotLocked);
+      lockBtn.textContent = rotLocked ? '🔒 회전 고정' : '⟳ 자동 회전';
+      lockBtn.title = rotLocked ? '자동 회전 다시 켜기' : '자동 회전 멈추기';
+    };
+    paintLock();
+    lockBtn.addEventListener('click', () => {
+      rotLocked = !rotLocked; paintLock();
+      PK.Audio.init(); PK.Audio.click();
+      try { localStorage.setItem('pk_rotlock', rotLocked ? '1' : '0'); } catch (e) { /* 무시 */ }
+    });
     el.addEventListener('pointerdown', (e) => { dragging = true; lastX = e.clientX; el.setPointerCapture(e.pointerId); });
     el.addEventListener('pointermove', (e) => { if (dragging) { rotY += (e.clientX - lastX) * 0.012; lastX = e.clientX; } });
     el.addEventListener('pointerup', () => { dragging = false; });
@@ -115,18 +128,13 @@ PK.Lobby = (function () {
   function update() {
     if (!active || !renderer) return;
     const t = (performance.now() - t0) / 1000;
-    if (!dragging) rotY += 0.004;
+    if (!dragging && !rotLocked) rotY += 0.004;
     if (avatar) {
       avatar.rotation.y = rotY;
-      const P = avatar.userData.parts;
-      // 대기 모션: 숨쉬기, 가벼운 발 구르기
-      P.hips.position.y = 0.97 + Math.sin(t * 2.2) * 0.008;
-      P.spine.rotation.x = Math.sin(t * 2.2) * 0.02;
-      P.armL.rotation.z = 0.14 + Math.sin(t * 2.2) * 0.03;
-      P.armR.rotation.z = -0.14 - Math.sin(t * 2.2) * 0.03;
-      P.head.rotation.y = Math.sin(t * 0.7) * 0.15;
+      PK.relaxedStand(avatar.userData.parts, t); // 편하게 선 자세 (킥 전 대기와 같음)
     }
-    if (avatar && avatar.userData.anim) avatar.userData.anim('Idle_Loop', { fade: 0 }); // 실제 대기 애니메이션
+    // 대기 애니메이션은 골반을 앞으로 내민 자세라, 로비에서는 곧게 선 기본 자세 + 숨쉬기만 씀
+    if (avatar && avatar.userData.anim) avatar.userData.anim(null, { fade: 0 });
     if (avatar && avatar.userData.sync) avatar.userData.sync();
     renderer.render(scene, camera);
   }
@@ -159,5 +167,8 @@ PK.Lobby = (function () {
     show() { active = true; document.getElementById('lobby').classList.add('active'); setTimeout(resize, 0); },
     hide() { active = false; document.getElementById('lobby').classList.remove('active'); },
     profile(i) { return profiles[i]; },
+    _cam: () => camera, // 점검용
+    _avatar: () => avatar,
+    _rot: (v) => { if (v !== undefined) { rotY = v; rotLocked = true; } return rotY; },
   };
 })();
