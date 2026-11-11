@@ -46,6 +46,11 @@ PK.Game = (function () {
   const PUSH_RUN_D = 1.85;                           // 밀어차기 동작에 들어가는 자리 뒤로 더 물러서는 거리
   const PRE_V0 = 1.5, PRE_W0 = 0.4, PRE_POW = 3;     // 출발 속도(m/s)·보폭 비율, 가속 곡선 (클수록 오래 천천히 가다 끝에서 확 빨라짐)
   const KICK_SPEED = 1.2;                            // 킥 동작 재생 속도 (원래 동작보다 빠르고 힘차게)
+  // 멈칫: 동작을 멈추지 않고, 보폭은 그대로 둔 채 달리는 속도만 조금 줄였다가 다시 원래 속도로
+  const STUT_RATE = 0.5;                             // 멈칫 중 진행 속도 (평소 대비)
+  const STUT_IN = 0.12, STUT_OUT = 0.1;              // 감속·재가속에 걸리는 시간 상수 (초): 놓으면 약 0.3초 만에 원래 속도
+  const STUT_MAX = 1.0;                              // 멈칫 전체 시간 (누르기 시작 ~ 원래 속도 회복) 최대값
+  const STUT_HOLD_MAX = STUT_MAX - 3 * STUT_OUT;     // 그래서 누르고 있을 수 있는 최대 시간 (0.7초)
   // 킥 동작 경로에서 시간 ct 의 이동 속도 (m/s, 동작 재생 속도 반영)
   const clipSpeed = (def, ct) => { const a = clipRootAt(def, ct), b = clipRootAt(def, ct + 0.1); return Math.hypot(b[0] - a[0], b[1] - a[1]) / 0.1 * KICK_SPEED; };
   function setupPreRun(def, D, dir, w1, phEnd) {
@@ -130,7 +135,7 @@ PK.Game = (function () {
     shot: null, dive: null,
     ball: null, flight: null,
     cam: { pos: new V3(0, 1.75, 15.5), look: new V3(0, 1.0, 0), tPos: new V3(), tLook: new V3(), speed: 3 },
-    keys: {}, mouse: null, timers: [], touchAxis: { x: 0, y: 0 },
+    keys: {}, timers: [], touchAxis: { x: 0, y: 0 },
   };
 
   // ---------- 유틸 ----------
@@ -164,10 +169,7 @@ PK.Game = (function () {
 
     // 입력
     const canvas = renderer.domElement;
-    canvas.addEventListener('pointermove', (e) => { st.mouse = { x: e.clientX, y: e.clientY }; });
-    // 마우스 클릭 = 스페이스 (터치는 화면 버튼으로만 조작)
-    canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button === 0) pressAction(); });
-    window.addEventListener('pointerup', (e) => { if (e.pointerType === 'mouse' && e.button === 0) releaseAction(); });
+    // 조작은 키보드(방향키·스페이스)와 터치 화면 버튼만: 마우스 조준·클릭은 쓰지 않음
     window.addEventListener('keydown', (e) => {
       if (!st.active) return;
       st.keys[e.code] = true;
@@ -695,12 +697,21 @@ PK.Game = (function () {
     $('btn-action').textContent = kickerAiming ? '슛' : '다이빙';
     $('btn-stutter-touch').classList.toggle('show', !!(isTouch && canStutter && st.state === 'runup'));
     $('btn-stutter-touch').classList.toggle('alt', !!(isTouch && (on || kickerAiming))); // 다이빙 버튼과 겹치면 왼쪽 중간으로
+    const KR = st.K;
+    if (KR && KR.manual && KR.refineUntil && st.time <= KR.refineUntil && KR.diveWorld && !KR.autoStay) {
+      const ay = keeperAxis().y;
+      if (Math.abs(ay) >= 0.3) {
+        KR.refineUntil = 0;
+        KR.diveWorld.y = clamp(1.0 + ay * 0.9, 0.2, 2.3);
+        if (KR.dive) { KR.dive = planDive(KR.diveWorld, KR.diveRootX !== undefined ? KR.diveRootX : KR.av.position.x, planOpt(KR.timing)); KR.clipDive = undefined; KR.re = null; }
+      }
+    }
     if (!on) return;
     const a = keeperAxis();
     const K = st.K;
     // 스페이스를 먼저 누르고 방향을 기다리는 중: 방향이 들어오면 그쪽으로, 시간이 지나면 가운데 버티기
     if (K.diveWait !== undefined) {
-      if (Math.abs(a.x) >= 0.3 || Math.abs(a.y) >= 0.3 || st.time - K.diveWait >= PK.Tune.dirWait) { manualDive(true); return; }
+      if (Math.abs(a.x) >= 0.3 || st.time - K.diveWait >= PK.Tune.dirWait) { manualDive(true); return; }
     }
     K.shiftTarget = clamp((K.shiftTarget || 0) + a.x * 1.5 * dt, -PK.Tune.maxShift, PK.Tune.maxShift);
     S.aim.visible = false; // 키퍼는 과녁 없이 몸의 움직임만 보고 판단
@@ -712,8 +723,9 @@ PK.Game = (function () {
   function manualDive(force) {
     const K = st.K;
     const a = keeperAxis();
-    const noDir = Math.abs(a.x) < 0.3 && Math.abs(a.y) < 0.3;
-    if (noDir && !force) { if (K.diveWait === undefined) K.diveWait = st.time; return; }
+    // 좌우가 없으면(방향 없음 또는 위아래만) 좌우 입력을 잠깐 기다림: '아래 → 스페이스 → 오른쪽'도 오른쪽 아래로
+    const hasX = Math.abs(a.x) >= 0.3, hasY = Math.abs(a.y) >= 0.3;
+    if (!hasX && !force) { if (K.diveWait === undefined) K.diveWait = st.time; return; }
     const pressT = K.diveWait !== undefined ? K.diveWait : st.time; // 일찍/늦게 판정은 스페이스를 누른 순간 기준
     K.diveWait = undefined;
     const contact = st.flight ? st.flight.t0 : K.expectedContact;
@@ -728,6 +740,8 @@ PK.Game = (function () {
     }
     K.diveWorld = keeperDiveTarget(keeperAxis());
     K.diveStart = st.time;
+    // 좌우만 누른 채 출발했으면, 잠깐 동안 들어온 위아래 입력으로 높이를 고침 ('오른쪽 → 스페이스 → 아래'도 오른쪽 아래로)
+    K.refineUntil = hasX && !hasY ? pressT + PK.Tune.dirWait : 0;
     S.aim.visible = false;
     setText('instruction', '');
     PK.AI.rememberDive(K.diveWorld.x);
@@ -738,14 +752,14 @@ PK.Game = (function () {
     document.querySelectorAll('#kick-types button').forEach((b) => b.classList.toggle('on', b.dataset.type === st.kickType));
   }
 
-  // ---------- 멈칫 (달려가다 원하는 순간에, 누르고 있는 동안 멈춤: 최소 0.3초, 최대 1초) ----------
+  // ---------- 멈칫 (달려가다 원하는 순간에, 누르고 있는 동안 감속: 회복까지 포함해 최대 1초) ----------
   function kickerHumanNow() { return isLocal(st.kickerTeam); }
   function startStutter(byAI, src) {
     const run = st.Kk && st.Kk.run;
     if (!run || run.kicked || run.stutterUsed || run.paused || (!byAI && !kickerHumanNow())) return;
     if (!byAI && st.mode === 'multi') return; // 한 화면 멀티: 멈칫 없음 (스페이스는 키퍼 다이빙)
-    const tauEff = st.time - run.t0 - run.pausedTotal;
-    if (tauEff < 0.15 || tauEff > run.approach * 0.93) return; // 출발 직후·디딤발 이후엔 불가
+    const tauEff = run.tw;
+    if (tauEff < 0.15 || tauEff > run.stutterEnd) return; // 출발 직후·킥 동작에 들어간 뒤엔 불가
     run.paused = true; run.pauseStart = st.time; run.stutterUsed = true; run.stuttered = true; run.releaseReq = false; run.src = src || 'ai';
     $('btn-stutter-touch').classList.add('on');
     if (online() && kickerHumanNow()) PK.Online.set({ stut: { gid: st.gid, n: kickN(), s: 1, r: 0 } });
@@ -895,7 +909,9 @@ PK.Game = (function () {
   //  파넨카: 가운데로 살짝 띄우는 칩슛 → 매우 느림. 키퍼가 먼저 몸을 날리면 거의 골, 버티면 쉽게 잡힘
   const KICK_TYPES = {
     curl:    { name: '감아차기', speed: (p) => 12 + 16 * p, sigmaMul: 0.65, color: '#2fd0ff' },
-    instep:  { name: '인스텝',   speed: (p) => 13 + 21 * p, sigmaMul: 1.15, color: '#ffffff' },
+    // 인스텝(발등): 약하게 차도 빠르고 낮게 곧장 날아감. 예전 최저 13m/s 는 높이를 맞추려 공이 1m 넘게 떴다 떨어져
+    //  비스듬한 카메라에서 아웃프런트처럼 휘며 떨어지는 궤적으로 보였음
+    instep:  { name: '인스텝',   speed: (p) => 21 + 14 * p, sigmaMul: 1.15, color: '#ffffff' },
     panenka: { name: '파넨카',   speed: (p) => 12.4 + 3.4 * p, sigmaMul: 0.35, color: '#ffd34d' },
   };
   // 감아차기 커브: 키커는 오른발잡이 → 발 안쪽으로 감으면 공은 항상 오른쪽에서 왼쪽으로 휨
@@ -937,7 +953,11 @@ PK.Game = (function () {
     const T_APPROACH = clipKick ? kickContactT(clipKick) - 0.2 : 1.25; // 실제 킥 동작: 공에 닿는 시점이 동작에 정해져 있음
     st.Kk.run = { t0: st.time, approach: T_APPROACH, contact: T_APPROACH + 0.2, kicked: false, clip: clipKick, yaw0: st.Kk.av.rotation.y,
       paused: false, pausedTotal: 0, stutterUsed: false, stuttered: false,
-      ai: st.aiStutter ? { at: T_APPROACH * (0.55 + Math.random() * 0.3), dur: 0.35 + Math.random() * 0.4 } : null };
+      tw: 0, rate: 1, lastT: st.time, // 진행 시간(멈칫하면 느려짐) · 진행 속도
+      // 멈칫은 디딤발 직전까지 (속도를 절반으로만 줄여 킥 동작에 걸쳐도 슬로모션처럼 보이지 않음)
+      //  예전엔 킥 동작 전 구간에서만 돼서, 런업이 짧은 감아차기·파넨카는 마지막 0.6초에 눌러도 반응이 없었음
+      stutterEnd: T_APPROACH * 0.93,
+      ai: st.aiStutter ? { at: (clipKick ? clipKick.pre : T_APPROACH) * (0.4 + Math.random() * 0.35), dur: 0.35 + Math.random() * 0.4 } : null };
     const stutter = 0;
     // 키퍼 타이밍
     //  일찍: 키커의 리듬(멈칫 없는 예상 임팩트)에 맞춰 미리 몸을 날림 → 구석까지 닿지만 멈칫에 속음
@@ -984,8 +1004,8 @@ PK.Game = (function () {
     const run = st.Kk.run;
     if (kickerHumanNow()) PK.AI.rememberKickStyle(shot.type, !!run.stuttered);
     if (run.stuttered) {
-      if (K && K.dive && K.dive.mode === 'dive' && st.time - K.diveStart > 0.15) {
-        // 키퍼가 먼저 몸을 날린 걸 보고 반대쪽으로
+      // AI 키커만: 키퍼가 먼저 몸을 날린 걸 보고 반대쪽으로 (사람 키커는 조준한 방향 그대로 — 예전엔 사람도 반대쪽으로 바뀌어 엉뚱한 곳으로 갔음)
+      if (!kickerHumanNow() && K && K.dive && K.dive.mode === 'dive' && st.time - K.diveStart > 0.15) {
         const tx = -K.dive.side * clamp(Math.abs(shot.intended.x), 1.4, 2.9);
         shot = computeShot(new V3(tx, shot.intended.y, 0), shot.power, shot.baseSigma, shot.type, true);
         shot.redirected = true;
@@ -1492,17 +1512,23 @@ PK.Game = (function () {
       P.head.rotation.x = 0.06 + Math.sin(t * 0.37) * 0.04;
       return 'idle';
     }
-    // 멈칫 처리: AI 는 정해둔 시점/길이, 사람은 누르고 있는 동안 (최소 0.3초, 최대 1초)
-    if (run.ai && !run.stutterUsed && t - run.t0 - run.pausedTotal >= run.ai.at) startStutter(true);
+    // 멈칫 처리: AI 는 정해둔 시점/길이, 사람은 누르고 있는 동안 (최소 0.3초, 최대 STUT_HOLD_MAX — 회복까지 1초 안)
+    if (run.ai && !run.stutterUsed && run.tw >= run.ai.at) startStutter(true);
     if (run.paused) {
       const held = t - run.pauseStart;
       if (run.ai && held >= run.ai.dur) run.releaseReq = true;
-      if ((run.releaseReq && held >= 0.3) || held >= 1.0) {
+      // 디딤발 직전에 이르면 자동으로 놓음
+      if ((run.releaseReq && held >= 0.3) || held >= STUT_HOLD_MAX || run.tw >= run.stutterEnd + 0.08) {
         run.paused = false; run.pausedTotal += held;
         $('btn-stutter-touch').classList.remove('on');
       }
     }
-    let tau = (run.paused ? run.pauseStart : t) - run.t0 - run.pausedTotal;
+    // 진행 시간: 멈칫하면 진행 속도가 STUT_RATE 까지 빠르게 줄고, 놓으면 다시 원래 속도로 가속 (동작이 멈추지 않음)
+    const dtR = Math.max(0, t - run.lastT); run.lastT = t;
+    run.rate += ((run.paused ? STUT_RATE : 1) - run.rate) * (1 - Math.exp(-dtR / (run.paused ? STUT_IN : STUT_OUT)));
+    if (!run.paused && run.rate > 0.995) run.rate = 1;
+    run.tw += dtR * run.rate;
+    let tau = run.tw; // 몸이 나가는 거리와 다리 위상이 같이 느려지므로 보폭은 그대로
     // 키퍼 쪽에 남은 시간 알려주기 (사람 키퍼 타이밍 판정, AI '보통' 타이밍)
     const K = st.K;
     if (K && !run.kicked) {
@@ -1511,7 +1537,7 @@ PK.Game = (function () {
       if (!K.manual && K.timing === 'normal' && K.diveStart === Infinity && !run.paused && remain <= 0.06) K.diveStart = t;
     }
     if (run.clip) {
-      // 실제 페널티킥 동작: 런업·킥·팔로우스루 전체. 멈칫하면 그 자리에서 동작이 멈춤
+      // 실제 페널티킥 동작: 런업·킥·팔로우스루 전체. 멈칫하면 보폭은 그대로 속도만 줄였다가 다시 원래 속도로
       const def = run.clip;
       Kk.animReq = kickClipPose(def, tau, av.position);
       av.rotation.y = kickYaw(def, tau, run.yaw0);
@@ -1887,8 +1913,6 @@ PK.Game = (function () {
   }
 
   // ---------- 매 프레임 ----------
-  const raycaster = new THREE.Raycaster();
-  const goalPlane = new THREE.Plane(new V3(0, 0, 1), 0);
   function updateAim(dt) {
     const target = st.aim;
     const lim = { x: 4.8, y0: BR, y1: 3.4 };
@@ -1900,14 +1924,6 @@ PK.Game = (function () {
     if (k.ArrowUp || k.KeyW) { target.y += sp; moved = true; }
     if (k.ArrowDown || k.KeyS) { target.y -= sp; moved = true; }
     if (st.touchAxis.x || st.touchAxis.y) { target.x += st.touchAxis.x * sp; target.y += st.touchAxis.y * sp; moved = true; }
-    if (moved) st.mouse = null;
-    if (st.mouse) {
-      const rect = renderer.domElement.getBoundingClientRect();
-      const ndc = new THREE.Vector2(((st.mouse.x - rect.left) / rect.width) * 2 - 1, -((st.mouse.y - rect.top) / rect.height) * 2 + 1);
-      raycaster.setFromCamera(ndc, camera);
-      const hit = new V3();
-      if (raycaster.ray.intersectPlane(goalPlane, hit)) target.set(hit.x, hit.y, 0);
-    }
     target.x = clamp(target.x, -lim.x, lim.x);
     target.y = clamp(target.y, lim.y0, lim.y1);
     S.aim.position.set(target.x, target.y, 0.02);

@@ -238,6 +238,7 @@ PK.PlayerModel = (function () {
     if (B.upperarm_l) { const ua = B.upperarm_l.getWorldPosition(V3()); kitDims.shoulder = ua.y + 0.03; kitDims.armY = ua.y; kitDims.armZ = ua.z; kitDims.armX = Math.abs(ua.x); }
     if (B.pelvis) kitDims.hipZ = B.pelvis.getWorldPosition(V3()).z;
     if (B.middle_01_l) { const k = B.middle_01_l.getWorldPosition(V3()); kitDims.knuckle = [Math.abs(k.x), k.y, k.z]; } // 손가락 시작 마디 (주먹 쥐기 기준)
+    Object.keys(kitGeos).forEach((n) => { if (meshKind[n] === KIND.body) curlFingers(kitGeos[n], meshInvW[n], 0, FINGER_RELAX); }); // 평소 손: 살짝 오므림
     if (neckY > 0) kitDims.neck = neckY;
     if (neckF[0] > 0 && neckB[0] > 0) { kitDims.neckF = neckF; kitDims.neckB = neckB; }
     if (shortsMinY < 9) kitDims.shortsHem = shortsMinY;
@@ -732,6 +733,35 @@ diffuseColor.rgb = col;`)
     out.y -= (0.005 * bw + 0.003 * iw) * amt; out.x -= sg * 0.003 * iw * amt;
     return out;
   }
+  // 손가락 말기: 이 모델은 손가락 정점이 손 뼈 하나에 묶여 있어 손가락 뼈로는 못 굽힘
+  //  → 기본 자세(T자, 손바닥이 아래)에서 손가락 마디 너머 정점을 손바닥 쪽으로 둥글게 말아 둠
+  //  from → to: 말린 정도 (0 = 쫙 편 원래 손, 1 = 꽉 쥔 주먹). 지오메트리가 이미 from 만큼 말려 있다고 보고 to 까지 더 맒
+  const FINGER_RELAX = 0.2; // 평소 손: 손가락을 살짝 오므린 편한 모양 (원래 손은 쫙 펴져 뻣뻣해 보였음)
+  function curlFingers(g, inv, from, to) {
+    const pos = g.attributes.position, bind = g.attributes.aBind, nor = g.attributes.normal;
+    const [kx, ky] = kitDims.knuckle, R = 0.019, MAXT = 4.3;
+    const d0 = V3().applyMatrix4(inv), d = V3(), off = V3();
+    const nmW = new THREE.Matrix3().getNormalMatrix(inv.clone().invert()), nmI = new THREE.Matrix3().getNormalMatrix(inv), nv = V3();
+    const tgt = (u, w, th) => [kx + (R + w) * Math.sin(th), (ky - R) + (R + w) * Math.cos(th)];
+    for (let i = 0; i < pos.count; i++) {
+      const bx = bind.getX(i), by = bind.getY(i), u = Math.abs(bx) - kx;
+      if (u <= 0 || u > 0.14 || Math.abs(by - ky) > 0.06) continue;
+      const sg = bx > 0 ? 1 : -1, yc = ky - u * 0.2, w = by - yc; // 손가락 중심선 위아래 거리
+      const full = Math.min(u / R, MAXT), th0 = full * from, th1 = full * to;
+      const a = from > 0 ? tgt(u, w, th0) : [Math.abs(bx), by], b = tgt(u, w, th1);
+      d.set(sg * (b[0] - a[0]), b[1] - a[1], 0);
+      off.copy(d).applyMatrix4(inv).sub(d0);
+      pos.setXYZ(i, pos.getX(i) + off.x, pos.getY(i) + off.y, pos.getZ(i) + off.z);
+      if (nor) { // 빛 받는 방향(법선)도 더 말린 각도만큼 돌림 (안 돌리면 접힌 손가락이 하얗게 떠 보임)
+        const th = th1 - th0;
+        nv.fromBufferAttribute(nor, i).applyMatrix3(nmW).normalize();
+        const c = Math.cos(th), sn = Math.sin(th), qx = sg * nv.x, qy = nv.y;
+        nv.set(sg * (qx * c + qy * sn), -qx * sn + qy * c, nv.z).applyMatrix3(nmI).normalize();
+        nor.setXYZ(i, nv.x, nv.y, nv.z);
+      }
+    }
+    pos.needsUpdate = true; if (nor) nor.needsUpdate = true;
+  }
   function shoutGeometry(name, amt) {
     const kind = meshKind[name];
     if (kind !== KIND.body && kind !== KIND.lashes) return kitGeos[name];
@@ -752,29 +782,8 @@ diffuseColor.rgb = col;`)
       off.copy(d).applyMatrix4(inv).sub(d0);
       pos.setXYZ(i, pos.getX(i) + off.x, pos.getY(i) + off.y, pos.getZ(i) + off.z);
     }
-    // 주먹 쥐기: 이 모델은 손가락 정점이 손 뼈 하나에 묶여 있어 손가락 뼈로는 못 쥠
-    //  → 기본 자세(T자, 손바닥이 아래)에서 손가락 마디 너머 정점을 손바닥 쪽으로 둥글게 말아 둠 (함성 세리머니 때만)
-    if (kind === KIND.body) {
-      const [kx, ky] = kitDims.knuckle, R = 0.019, MAXT = 4.3;
-      const nor = g.attributes.normal, nmW = new THREE.Matrix3().getNormalMatrix(inv.clone().invert()), nmI = new THREE.Matrix3().getNormalMatrix(inv), nv = V3();
-      for (let i = 0; i < pos.count; i++) {
-        const bx = bind.getX(i), by = bind.getY(i), u = Math.abs(bx) - kx;
-        if (u <= 0 || u > 0.14 || Math.abs(by - ky) > 0.06) continue;
-        const sg = bx > 0 ? 1 : -1, yc = ky - u * 0.2, w = by - yc; // 손가락 중심선 위아래 거리
-        const th = Math.min(u / R, MAXT) * amt;
-        const nx = kx + (R + w) * Math.sin(th), ny = (ky - R) + (R + w) * Math.cos(th);
-        d.set(sg * nx - bx, ny - by, 0);
-        off.copy(d).applyMatrix4(inv).sub(d0);
-        pos.setXYZ(i, pos.getX(i) + off.x, pos.getY(i) + off.y, pos.getZ(i) + off.z);
-        if (nor) { // 빛 받는 방향(법선)도 말린 각도만큼 돌림 (안 돌리면 접힌 손가락이 하얗게 떠 보임)
-          nv.fromBufferAttribute(nor, i).applyMatrix3(nmW).normalize();
-          const c = Math.cos(th), sn = Math.sin(th), qx = sg * nv.x, qy = nv.y;
-          nv.set(sg * (qx * c + qy * sn), -qx * sn + qy * c, nv.z).applyMatrix3(nmI).normalize();
-          nor.setXYZ(i, nv.x, nv.y, nv.z);
-        }
-      }
-      if (nor) nor.needsUpdate = true;
-    }
+    // 주먹 쥐기 (함성 세리머니 때): 편하게 오므린 기본 손에서 꽉 쥔 주먹까지 말아 넣음
+    if (kind === KIND.body) curlFingers(g, inv, FINGER_RELAX, amt);
     pos.needsUpdate = true;
     const out = kind === KIND.body ? markMouthWall(g, moveY) : g;
     out.computeBoundingSphere();
@@ -819,6 +828,9 @@ diffuseColor.rgb = col;`)
   // ---------- 리타깃: 기존 관절의 자세를 모델 뼈에 옮김 ----------
   function setupRetarget(root, model, B, face) {
     const P = root.userData.parts;
+    // 팔 비틀림 나누기용: 기본 자세(바인드)의 아래팔·손 로컬 회전 (아래에서 뼈를 곧게 펴기 전에 기억)
+    const twistRest = {};
+    ['l', 'r'].forEach((sd) => ['lowerarm_', 'hand_'].forEach((n) => { const b = B[n + sd]; if (b) twistRest[n + sd] = b.quaternion.clone(); }));
     // 1) 기존 리그를 '모든 회전 0' 기본 자세로 두고 기준을 잡음
     const saved = [];
     root.traverse((o) => { if (o !== root && !o.isBone && o.userData.rigPart) { saved.push([o, o.quaternion.clone(), o.position.clone()]); o.quaternion.identity(); } });
@@ -951,6 +963,39 @@ diffuseColor.rgb = col;`)
       }
     };
 
+    // 팔 비틀림 나누기: 이 모델은 팔뚝 보조 뼈가 없어, 동작 데이터의 팔뚝 비틀림이 팔꿈치(아래팔 뼈)나 손목(손 뼈) 한 곳에 몰리면
+    //  그 마디가 사탕 껍질처럼 꼬여 보임 (예: 'Yes' 동작의 왼쪽 팔꿈치 -103°, 다이빙의 손목 90~114°)
+    //  → 팔뚝 축으로 도는 비틀림을 팔꿈치와 손목에 반씩 나눔. 손의 최종 방향은 그대로
+    const TW = { q: new THREE.Quaternion(), r: new THREE.Quaternion(), ax: new THREE.Vector3() };
+    function twistAbout(q, ax) { // 회전 q 중 축 ax 로 도는 부분의 각도 (-π..π)
+      const dot = q.x * ax.x + q.y * ax.y + q.z * ax.z;
+      let a = 2 * Math.atan2(Math.abs(dot), q.w) * Math.sign(dot || 1);
+      if (a > Math.PI) a -= 2 * Math.PI; else if (a < -Math.PI) a += 2 * Math.PI;
+      return a;
+    }
+    function spreadArmTwist() {
+      ['l', 'r'].forEach((sd) => {
+        const la = B['lowerarm_' + sd], hd = B['hand_' + sd], la0 = twistRest['lowerarm_' + sd], hd0 = twistRest['hand_' + sd];
+        if (!la || !hd || !la0 || !hd0) return;
+        TW.ax.copy(hd.position).normalize();                                    // 팔뚝 축 (아래팔 좌표)
+        const tL = twistAbout(TW.q.copy(la0).invert().multiply(la.quaternion), TW.ax); // 팔꿈치 쪽 비틀림
+        const tH = twistAbout(TW.r.copy(hd.quaternion).multiply(TW.q.copy(hd0).invert()), TW.ax); // 손목 쪽 비틀림
+        const d = (tH - tL) / 2;
+        if (Math.abs(d) < 0.03) return;
+        TW.q.setFromAxisAngle(TW.ax, d);
+        la.quaternion.multiply(TW.q);                  // 아래팔을 팔뚝 축으로 d 만큼 더 돌리고
+        hd.quaternion.premultiply(TW.q.invert());      // 손은 그만큼 되돌려 손 방향 유지
+      });
+      // 손목 꺾임 제한: 동작 데이터에서 손목이 70° 넘게 뒤로 젖혀지는 경우(키퍼 다이빙)가 있어 부자연스러움 → 최대 45°
+      ['l', 'r'].forEach((sd) => {
+        const hd = B['hand_' + sd], hd0 = twistRest['hand_' + sd]; if (!hd || !hd0) return;
+        TW.ax.set(0, 1, 0).applyQuaternion(hd.quaternion);
+        const ang = TW.ax.angleTo(new THREE.Vector3(0, 1, 0).applyQuaternion(hd0));
+        if (ang > WRIST_MAX) hd.quaternion.copy(TW.r.copy(hd0).slerp(hd.quaternion, WRIST_MAX / ang));
+      });
+    }
+    const WRIST_MAX = 0.785;
+
     // 팔을 어깨 위로 올리면 실제 사람처럼 어깨(쇄골·날개뼈)도 같이 들림
     //  → 쇄골이 그대로면 어깨가 꺼지고 소매가 접혀 보임. 위팔 방향은 그대로 두고 쇄골만 들어 올림
     const chest = B.spine_03, shV = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
@@ -1002,6 +1047,7 @@ diffuseColor.rgb = col;`)
         e.bone.updateMatrixWorld(true);
       }
       applyAnim();
+      spreadArmTwist();
       liftShoulders();
       // 게임이 동작 위에 덧붙이는 손질 (예: 다이빙 중 두 손을 모음)
       if (root.userData.postAnim) { model.updateMatrixWorld(true); root.userData.postAnim(B); }
