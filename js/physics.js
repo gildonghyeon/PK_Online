@@ -160,13 +160,20 @@ PK.Physics = (function () {
             events.push({ type: 'catch', part: c.part, speed });
             return;
           }
-          // 손/팔은 강한 슛에 밀림 (반발계수가 음수가 되면 공이 그대로 밀고 들어감)
-          const e = c.part === 'body' || c.part === 'leg' ? 0.3
-            : (c.part === 'hand' ? 0.42 : 0.3) - Math.max(0, speed - 23) * 0.07;
+          // 손/팔은 아주 강한 슛에만 밀림 (반발계수가 음수가 되면 공이 그대로 밀고 들어감)
+          //  예전엔 23m/s 부터 크게 약해져 보통 페널티(25~30m/s)도 손에 맞고 들어가는 일이 잦았음
+          const e = c.part === 'body' || c.part === 'leg' ? 0.32
+            : (c.part === 'hand' ? 0.55 : 0.38) - Math.max(0, speed - 28) * 0.06;
           const vN = nrm.clone().multiplyScalar(vn);       // 법선 성분
-          const vT = rel.clone().sub(vN).multiplyScalar(e < 0 ? 0.85 : 0.6); // 접선 성분 (마찰)
+          const vT = rel.clone().sub(vN).multiplyScalar(e < 0 ? 0.85 : 0.5); // 접선 성분 (마찰)
           rel.copy(vT).addScaledVector(nrm, -vn * e);
           if (e < 0) env.ignoreUntil = s.t + 0.06; // 손을 밀어내고 통과
+          else if (c.part === 'hand' || c.part === 'arm') {
+            // 손·팔로 쳐낸 공은 골문 바깥쪽(가까운 골대 쪽)으로: 골문 안으로 계속 가던 속도를 줄이고 옆으로 밀어냄
+            const out = Math.sign(s.p.x) || 1;
+            if (rel.z < 0) rel.z *= 0.45;
+            rel.x += out * Math.min(6, speed * 0.22);
+          }
           s.v.copy(rel).add(kv);
           s.spin.multiplyScalar(0.3);
           env.touched = true;

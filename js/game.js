@@ -3,7 +3,9 @@ window.PK = window.PK || {};
 
 // 골키퍼 다이빙 밸런스: 최대 다이빙 거리(m), 다이빙 시간 계수, 날아가며 더 뻗을 수 있는 거리(m)
 PK.Tune = { maxT: 2.05, diveTime: 0.3, stretch: 0.15, maxShift: 0.6, lateDelay: 0.08, lateReach: 1.0, lateTime: 1.0, earlyLead: 0.14, earlyReach: 1.1,
-  clipDiveT: 0.85, clipDiveEase: 1.6, clipGloveR: 0.115 }; // 실제 다이빙 동작: 다 뻗는 시간(계획 시간 대비), 처음 가속 정도, 장갑 판정 반지름
+  clipDiveT: 0.85, clipDiveEase: 1.6, clipGloveR: 0.13, // 실제 다이빙 동작: 다 뻗는 시간(계획 시간 대비), 처음 가속 정도, 장갑 판정 반지름
+  readX: 1.25, readY: 0.95, readRate: 6.0, // 날아가며 공 쪽으로 손을 맞추는 범위(m)·속도(m/s): 방향을 읽으면 대체로 닿게
+  dirWait: 0.15 }; // 사람 키퍼가 방향 없이 스페이스를 먼저 눌렀을 때 방향 입력을 기다리는 시간(초)
 
 PK.Game = (function () {
   const V3 = THREE.Vector3;
@@ -677,9 +679,11 @@ PK.Game = (function () {
   }
   function keeperControlActive() {
     const K = st.K;
-    // 자동 버티기 반응 중이어도 공이 키퍼에게 닿기 전까지는 다이빙 가능 (킥 이후에도 뛸 수 있게)
-    const ballComing = !st.flight || (!st.flight.decided && !st.flight.events.keeper && st.ball && st.ball.p.z > KEEPER_Z + 0.3);
-    return !!(K && K.manual && (!K.diveWorld || (K.autoStay && ballComing)) && (st.state === 'keeperReady' || st.state === 'runup' || st.state === 'flight'));
+    // 아직 몸을 날리지 않았으면 킥 뒤에도 언제든 다이빙 가능 (자동 버티기 자세로 굳어 있어도 누르면 몸을 날림)
+    //  예전엔 공이 키퍼 가까이 오거나 골라인을 넘으면 입력을 막아, 킥 뒤 조금만 늦게 눌러도 키퍼가 굳은 채 반응이 없었음
+    //  (막을 수 있는지는 기존 판정 그대로: 늦게 뛰면 공에 못 닿음)
+    const canDive = !K || !K.diveWorld || K.autoStay;
+    return !!(K && K.manual && canDive && !K.celebrate && (st.state === 'keeperReady' || st.state === 'runup' || st.state === 'flight' || st.state === 'result'));
   }
   // 매 프레임: 다이빙 전에는 방향키 좌우로 골라인 위를 이동, 조준점에 다이빙 방향 미리보기
   function keeperControl(dt) {
@@ -694,15 +698,26 @@ PK.Game = (function () {
     if (!on) return;
     const a = keeperAxis();
     const K = st.K;
+    // 스페이스를 먼저 누르고 방향을 기다리는 중: 방향이 들어오면 그쪽으로, 시간이 지나면 가운데 버티기
+    if (K.diveWait !== undefined) {
+      if (Math.abs(a.x) >= 0.3 || Math.abs(a.y) >= 0.3 || st.time - K.diveWait >= PK.Tune.dirWait) { manualDive(true); return; }
+    }
     K.shiftTarget = clamp((K.shiftTarget || 0) + a.x * 1.5 * dt, -PK.Tune.maxShift, PK.Tune.maxShift);
     S.aim.visible = false; // 키퍼는 과녁 없이 몸의 움직임만 보고 판단
   }
 
   // 사람 키퍼: 스페이스를 누른 순간, 현재 방향으로 다이빙
-  function manualDive() {
+  //  방향 없이 스페이스를 먼저 눌렀으면 잠깐(PK.Tune.dirWait) 방향 입력을 기다림
+  //  → '방향키 누른 채 스페이스'와 '스페이스 누르고 바로 방향키'가 같은 다이빙이 됨 (끝내 방향이 없으면 가운데 버티기)
+  function manualDive(force) {
     const K = st.K;
+    const a = keeperAxis();
+    const noDir = Math.abs(a.x) < 0.3 && Math.abs(a.y) < 0.3;
+    if (noDir && !force) { if (K.diveWait === undefined) K.diveWait = st.time; return; }
+    const pressT = K.diveWait !== undefined ? K.diveWait : st.time; // 일찍/늦게 판정은 스페이스를 누른 순간 기준
+    K.diveWait = undefined;
     const contact = st.flight ? st.flight.t0 : K.expectedContact;
-    const dt = st.time - contact; // 음수 = 킥 전
+    const dt = pressT - contact; // 음수 = 킥 전
     // 킥보다 확실히 먼저 뛰면 체중을 미리 실어 더 멀리, 킥 후 반응이면 보통
     // 킥보다 먼저 = 일찍, 킥 직후 = 보통, 공이 날아가는 걸 보고 = 늦게 (공 쪽으로 정확히 가지만 출발이 늦음)
     K.timing = dt < -0.1 ? 'early' : dt > 0.05 && st.flight ? 'late' : 'normal';
@@ -754,7 +769,7 @@ PK.Game = (function () {
     if (!st.active) return;
     PK.Audio.init();
     if (st.state === 'kickerAim' && !st.charging) { st.charging = true; st.power = 0; }
-    else if ((st.state === 'runup' || st.state === 'flight') && keeperControlActive()) {
+    else if ((st.state === 'runup' || st.state === 'flight' || st.state === 'result') && keeperControlActive()) {
       manualDive();
     } else if (st.state === 'runup' && kickerHumanNow() && !isLocal(st.keeperTeam)) {
       startStutter(false, 'space'); // 싱글(상대 AI 키퍼)에선 스페이스로도 멈칫
@@ -1078,17 +1093,18 @@ PK.Game = (function () {
     if (st.time >= K.diveStart && K.diveWorld && !K.dive) {
       if (K.timing === 'late' && st.shot) {
         // 공을 보고 뛰므로 실제 슛 쪽으로 크게 보정 (완벽하지는 않음)
-        // 사람 키퍼는 고른 방향이 공과 같은 쪽일 때만 (반대쪽을 골랐으면 고른 대로)
+        // 사람 키퍼는 방향을 골랐고 그 방향이 공과 같은 쪽일 때만 (반대쪽을 골랐으면 고른 대로,
+        //  방향 없이 눌렀으면 가운데 버티기 그대로 — 예전엔 가운데도 '같은 쪽'으로 쳐서 공 쪽으로 자동 다이빙했음)
         const tg = st.shot.target, rx = K.av.position.x;
-        const sameSide = !K.manual || Math.sign(tg.x - rx) === Math.sign(K.diveWorld.x - rx) || Math.abs(K.diveWorld.x - rx) < 0.3;
+        const chose = Math.abs(K.diveWorld.x - rx) >= 0.3;
+        const sameSide = !K.manual || (chose && Math.sign(tg.x - rx) === Math.sign(K.diveWorld.x - rx));
         if (sameSide) K.diveWorld.set(tg.x + gauss() * 0.3, clamp(tg.y + gauss() * 0.25, 0.2, 2.3), 0);
       }
       // 늦게 뛰는 키퍼는 체중을 미리 싣지 못해 조금 느리고 덜 뻗음
       K.diveRootX = K.av.position.x;
       K.dive = planDive(K.diveWorld, K.av.position.x, K.timing === 'late' ? { reach: PK.Tune.lateReach, time: PK.Tune.lateTime }
         : K.timing === 'early' ? { reach: PK.Tune.earlyReach, time: 1 } : null); // 일찍 = 미리 체중을 실어 더 멀리
-      if (K.autoStay && K.dive.mode === 'center') K.dive.T *= 0.6; // 자동 반응은 공이 거의 왔을 때라 손을 빠르게
-      K.stepping = false;
+      if (K.autoStay && K.dive.mode === 'center') K.dive.T *= 0.6; // 자동 반응은 공이 거의 왔을 때라 손을 빠르게      K.stepping = false;
     }
     // 옆으로 날아가는 다이빙은 실제 골키퍼 다이빙 동작으로 (가운데 버티기·점프는 기존 동작)
     if (K.dive && K.clipDive === undefined) K.clipDive = K.dive.mode === 'dive' ? setupClipDive(K) : null;
@@ -1111,14 +1127,14 @@ PK.Game = (function () {
   }
 
   // ---------- 실제 골키퍼 다이빙 동작 (Mixamo) ----------
-  //  side: 동작이 날아가는 쪽(모델 x 부호), t0: 몸을 날리기 시작, ts: 가장 길게 뻗은 순간, tl: 땅에 닿음
+  //  side: 동작이 날아가는 쪽(모델 x 부호), t0: 몸을 기울여 박차기 시작 (그 앞은 제자리 준비 동작이라 거기서 시작하면 누른 뒤 0.1~0.2초 몸이 굳어 보임), ts: 가장 길게 뻗은 순간, tl: 땅에 닿음
   //  lead: ts 에서 두 손 가운데 위치(모델 x, y, 동작 첫 프레임 기준 이동 포함)
   //  leadZ: ts 에서 손이 골반보다 앞으로 나온 거리 → 손끝이 골라인 바로 앞(HAND_Z)에 오도록 몸을 뒤로 둠
   //  pel: ts 에서 골반 위치 (몸을 기울이는 중심)
   const DIVE_CLIPS = {
     // 동작에서는 두 손이 30~56cm 벌어져 공이 손 사이로 빠짐 → 오른손을 왼손 옆(17cm)으로 모으고, 모은 두 손 가운데를 공에 맞춤
-    GkDiveLow: { side: 1, t0: 0.45, ts: 1.05, tl: 1.4, lead: [2.01, 0.78], pel: [1.43, 0.98], leadZ: 0.62 },
-    GkDiveHigh: { side: -1, t0: 0.4, ts: 0.9, tl: 1.3, lead: [-2.24, 1.47], pel: [-1.53, 1.04], leadZ: 0.48 },
+    GkDiveLow: { side: 1, t0: 0.58, ts: 1.05, tl: 1.4, lead: [2.01, 0.78], pel: [1.43, 0.98], leadZ: 0.62 },
+    GkDiveHigh: { side: -1, t0: 0.52, ts: 0.9, tl: 1.3, lead: [-2.24, 1.47], pel: [-1.53, 1.04], leadZ: 0.48 },
   };
   const DIVE_LIFT = [-0.4, 0.12]; // 몸 전체를 올리거나 내리는 양은 조금만 (나머지 높이는 몸을 기울여서)
   const DIVE_FWD = 0.25; // 동작의 앞으로 나가는 움직임은 1/4만 (골라인을 지키도록)
@@ -1248,13 +1264,14 @@ PK.Game = (function () {
     K.lastT = t;
     if (!K.re) K.re = { x: d.D.x, y: d.D.y, rz: 0 };
     // 공을 본 지 0.2초가 지나면 손을 보정 (킥 후에 뛴 키퍼는 이미 공을 보고 있으므로 바로)
-    const seesBall = st.shot && st.flight && st.time - st.flight.t0 > 0.2 && tau > 0.05;
+    const seesBall = st.shot && st.flight && st.time - st.flight.t0 > 0.15 && tau > 0.05;
     if (seesBall) {
       // 실제 다이빙 동작은 선수 위치 자체를 옮기므로, 다이빙을 시작한 자리 기준으로 계산
+      //  방향을 맞게 읽었으면 공 쪽으로 손을 충분히 맞출 수 있게 (방향이 틀리면 범위 밖이라 그대로 못 막음)
       const tx = st.shot.target.x - (K.clipDive ? K.clipDive.rootX : K.av.position.x), ty = st.shot.target.y;
       const step = (cur, goal, rate) => cur + clamp(goal - cur, -rate * kdt, rate * kdt);
-      K.re.x = step(K.re.x, clamp(tx, d.D.x - 0.7, d.D.x + 0.7), 3.2);
-      K.re.y = step(K.re.y, clamp(ty, d.D.y - 0.6, d.D.y + 0.6), 3.2);
+      K.re.x = step(K.re.x, clamp(tx, d.D.x - PK.Tune.readX, d.D.x + PK.Tune.readX), PK.Tune.readRate);
+      K.re.y = step(K.re.y, clamp(ty, d.D.y - PK.Tune.readY, d.D.y + PK.Tune.readY), PK.Tune.readRate);
     }
 
     if (d.mode === 'center') {
@@ -1617,6 +1634,7 @@ PK.Game = (function () {
     const F = st.flight; if (!F) return;
     const b = st.ball;
     F.env.keeper = keeperCapsules(dt);
+    if (F.outcome === 'goal') F.env.keeper = []; // 이미 골: 늦게 몸을 날린 키퍼가 그물 속 공을 건드리지 않게
     const sub = Math.ceil(dt / (1 / 600));
     const h = dt / sub;
     for (let i = 0; i < sub; i++) {
@@ -1815,16 +1833,18 @@ PK.Game = (function () {
     later(3.4, () => { if (st.state === 'end') show('result', true); });
   }
 
-  // 결승 세리머니: 웅크렸다가 두 팔을 위로 뻗으며 포효 (팔에 힘을 주어 들썩임)
+  // 결승 세리머니: 웅크렸다가 일어나며 양팔 알통 자세 (팔꿈치를 어깨 높이로 벌리고 주먹을 머리 옆으로 세워 힘을 줌)
   function roarPose(P, s) {
     const e = easeOut3(clamp((s - 0.25) / 0.35, 0, 1)), crouch = Math.sin(clamp(s / 0.3, 0, 1) * Math.PI) * (1 - e);
-    const pulse = s > 0.6 ? 0.5 + 0.5 * Math.sin((s - 0.6) * 7.5) : 0;
-    P.hips.position.set(0, 0.97 - crouch * 0.12 - e * 0.05, 0);
-    P.spine.rotation.set(0.3 * crouch - 0.22 * e - 0.04 * pulse, 0, 0); // 웅크렸다가 가슴을 활짝 폄
-    P.head.rotation.set(lerp(0.15, -0.06, e) - 0.03 * pulse, Math.sin(s * 1.3) * 0.08 * e, 0);
-    const up = lerp(0.35, 2.05 + pulse * 0.18, e);
-    P.armL.rotation.set(-0.5 * crouch - 0.3 * e, 0, up); P.armR.rotation.set(-0.5 * crouch - 0.3 * e, 0, -up);
-    P.elbowL.rotation.x = P.elbowR.rotation.x = lerp(-1.7, -0.75 - pulse * 0.4, e); // 주먹을 쥐고 힘을 주며 굽혔다 폈다
+    const pulse = s > 0.6 ? 0.5 + 0.5 * Math.sin((s - 0.6) * 7.5) : 0; // 알통에 힘을 줬다 풀었다
+    P.hips.position.set(0, 0.97 - crouch * 0.12 - e * 0.04 - pulse * 0.01, 0);
+    P.spine.rotation.set(0.3 * crouch - 0.12 * e - 0.03 * pulse, 0, 0); // 웅크렸다가 가슴을 펴고 살짝 뒤로
+    P.head.rotation.set(lerp(0.15, -0.04, e) - 0.02 * pulse, Math.sin(s * 1.3) * 0.06 * e, 0);
+    // 팔: 위팔은 옆으로 어깨보다 살짝 높게, 아래팔은 위로 세우고(위팔을 길이 방향으로 돌려), 손바닥은 머리 쪽
+    const lift = lerp(0.35, 1.6 + pulse * 0.06, e), twist = -1.6 * e - 0.5 * crouch;
+    P.armL.rotation.set(twist, -0.1 * e, lift); P.armR.rotation.set(twist, 0.1 * e, -lift);
+    P.elbowL.rotation.x = P.elbowR.rotation.x = lerp(-1.7, -2.15 - pulse * 0.2, e); // 주먹을 쥐고 힘을 주며 더 굽힘
+    if (P.handL) { P.handL.rotation.set(0, 1.3 * e, 0); P.handR.rotation.set(0, -1.3 * e, 0); }
     ['L', 'R'].forEach((sd, i) => {
       const sg = i === 0 ? 1 : -1;
       P['leg' + sd].rotation.set(-0.35 * crouch - 0.12 * e, 0, sg * 0.24 * e);

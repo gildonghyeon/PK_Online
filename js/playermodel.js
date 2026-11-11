@@ -127,7 +127,7 @@ PK.PlayerModel = (function () {
     return KIND.body;
   };
   const meshKind = {};   // 메시 이름 → 종류
-  const kitDims = { hem: 0.9, shoulder: 1.45, sockTop: 0.45, neck: 1.5, neckF: [1.565, 0.06], neckB: [1.595, -0.057], shortsHem: 0.6, armY: 1.42, armZ: 0, armX: 0.18, hipZ: 0 }; // 셔츠 밑단·어깨·목둘레 높이, 반바지 밑단, 양말 윗단, 팔 중심선 (기본 자세, m)
+  const kitDims = { hem: 0.9, shoulder: 1.45, sockTop: 0.45, neck: 1.5, neckF: [1.565, 0.06], neckB: [1.595, -0.057], shortsHem: 0.6, armY: 1.42, armZ: 0, armX: 0.18, hipZ: 0, knuckle: [0.8, 1.478, 0] }; // 셔츠 밑단·어깨·목둘레 높이, 반바지 밑단, 양말 윗단, 팔 중심선 (기본 자세, m)
   // ---------- 몸 비율 다듬기 (프로 축구선수 체형: 긴 다리, 작은 머리, 가는 허리 → 넓은 어깨) ----------
   //  뼈마다 (가로 x, 세로 y, 앞뒤 z) 배율. 기본 자세(T자)에서 그 뼈를 따르는 살을 뼈 위치를 중심으로 늘이고 줄인 뒤,
   //  자식 관절도 그만큼 옮기고, 그 모양을 새 기본 자세로 다시 묶음 (동작은 관절 회전이라 그대로 맞음)
@@ -237,6 +237,7 @@ PK.PlayerModel = (function () {
     if (sockTop > 0) kitDims.sockTop = sockTop;
     if (B.upperarm_l) { const ua = B.upperarm_l.getWorldPosition(V3()); kitDims.shoulder = ua.y + 0.03; kitDims.armY = ua.y; kitDims.armZ = ua.z; kitDims.armX = Math.abs(ua.x); }
     if (B.pelvis) kitDims.hipZ = B.pelvis.getWorldPosition(V3()).z;
+    if (B.middle_01_l) { const k = B.middle_01_l.getWorldPosition(V3()); kitDims.knuckle = [Math.abs(k.x), k.y, k.z]; } // 손가락 시작 마디 (주먹 쥐기 기준)
     if (neckY > 0) kitDims.neck = neckY;
     if (neckF[0] > 0 && neckB[0] > 0) { kitDims.neckF = neckF; kitDims.neckB = neckB; }
     if (shortsMinY < 9) kitDims.shortsHem = shortsMinY;
@@ -750,6 +751,29 @@ diffuseColor.rgb = col;`)
       if (d.lengthSq() < 1e-12) continue;
       off.copy(d).applyMatrix4(inv).sub(d0);
       pos.setXYZ(i, pos.getX(i) + off.x, pos.getY(i) + off.y, pos.getZ(i) + off.z);
+    }
+    // 주먹 쥐기: 이 모델은 손가락 정점이 손 뼈 하나에 묶여 있어 손가락 뼈로는 못 쥠
+    //  → 기본 자세(T자, 손바닥이 아래)에서 손가락 마디 너머 정점을 손바닥 쪽으로 둥글게 말아 둠 (함성 세리머니 때만)
+    if (kind === KIND.body) {
+      const [kx, ky] = kitDims.knuckle, R = 0.019, MAXT = 4.3;
+      const nor = g.attributes.normal, nmW = new THREE.Matrix3().getNormalMatrix(inv.clone().invert()), nmI = new THREE.Matrix3().getNormalMatrix(inv), nv = V3();
+      for (let i = 0; i < pos.count; i++) {
+        const bx = bind.getX(i), by = bind.getY(i), u = Math.abs(bx) - kx;
+        if (u <= 0 || u > 0.14 || Math.abs(by - ky) > 0.06) continue;
+        const sg = bx > 0 ? 1 : -1, yc = ky - u * 0.2, w = by - yc; // 손가락 중심선 위아래 거리
+        const th = Math.min(u / R, MAXT) * amt;
+        const nx = kx + (R + w) * Math.sin(th), ny = (ky - R) + (R + w) * Math.cos(th);
+        d.set(sg * nx - bx, ny - by, 0);
+        off.copy(d).applyMatrix4(inv).sub(d0);
+        pos.setXYZ(i, pos.getX(i) + off.x, pos.getY(i) + off.y, pos.getZ(i) + off.z);
+        if (nor) { // 빛 받는 방향(법선)도 말린 각도만큼 돌림 (안 돌리면 접힌 손가락이 하얗게 떠 보임)
+          nv.fromBufferAttribute(nor, i).applyMatrix3(nmW).normalize();
+          const c = Math.cos(th), sn = Math.sin(th), qx = sg * nv.x, qy = nv.y;
+          nv.set(sg * (qx * c + qy * sn), -qx * sn + qy * c, nv.z).applyMatrix3(nmI).normalize();
+          nor.setXYZ(i, nv.x, nv.y, nv.z);
+        }
+      }
+      if (nor) nor.needsUpdate = true;
     }
     pos.needsUpdate = true;
     const out = kind === KIND.body ? markMouthWall(g, moveY) : g;
