@@ -5,6 +5,7 @@ window.PK = window.PK || {};
 PK.Tune = { maxT: 2.05, diveTime: 0.3, stretch: 0.15, maxShift: 0.6, lateDelay: 0.08, lateReach: 1.0, lateTime: 1.0, earlyLead: 0.14, earlyReach: 1.1,
   clipDiveT: 0.85, clipDiveEase: 1.6, clipGloveR: 0.13, // 실제 다이빙 동작: 다 뻗는 시간(계획 시간 대비), 처음 가속 정도, 장갑 판정 반지름
   readX: 1.25, readY: 0.95, readRate: 6.0, // 날아가며 공 쪽으로 손을 맞추는 범위(m)·속도(m/s): 방향을 읽으면 대체로 닿게
+  readYChosen: 0.3, // 사람 키퍼가 위·아래를 직접 골랐을 때 높이 보정 범위(m)
   dirWait: 0.15 }; // 사람 키퍼가 방향 없이 스페이스를 먼저 눌렀을 때 방향 입력을 기다리는 시간(초)
 
 PK.Game = (function () {
@@ -703,6 +704,7 @@ PK.Game = (function () {
       if (Math.abs(ay) >= 0.3) {
         KR.refineUntil = 0;
         KR.diveWorld.y = clamp(1.0 + ay * 0.9, 0.2, 2.3);
+        KR.chosenV = true;
         if (KR.dive) { KR.dive = planDive(KR.diveWorld, KR.diveRootX !== undefined ? KR.diveRootX : KR.av.position.x, planOpt(KR.timing)); KR.clipDive = undefined; KR.re = null; }
       }
     }
@@ -739,6 +741,7 @@ PK.Game = (function () {
       K.hipStartX = K.last ? K.last.hx : 0;
     }
     K.diveWorld = keeperDiveTarget(keeperAxis());
+    K.chosenV = hasY; // 위·아래를 직접 골랐으면 그 높이를 지킴 (공 높이로 바꾸지 않음)
     K.diveStart = st.time;
     // 좌우만 누른 채 출발했으면, 잠깐 동안 들어온 위아래 입력으로 높이를 고침 ('오른쪽 → 스페이스 → 아래'도 오른쪽 아래로)
     K.refineUntil = hasX && !hasY ? pressT + PK.Tune.dirWait : 0;
@@ -1118,16 +1121,23 @@ PK.Game = (function () {
         const tg = st.shot.target, rx = K.av.position.x;
         const chose = Math.abs(K.diveWorld.x - rx) >= 0.3;
         const sameSide = !K.manual || (chose && Math.sign(tg.x - rx) === Math.sign(K.diveWorld.x - rx));
-        if (sameSide) K.diveWorld.set(tg.x + gauss() * 0.3, clamp(tg.y + gauss() * 0.25, 0.2, 2.3), 0);
+        // 사람 키퍼가 위·아래를 직접 골랐으면 높이는 고른 대로 (공 높이 쪽으로는 조금만): 오른쪽 위로 뛰었는데 낮게 깔려 날지 않게
+        const ny = K.manual && K.chosenV ? clamp(tg.y, K.diveWorld.y - 0.3, K.diveWorld.y + 0.3) : clamp(tg.y + gauss() * 0.25, 0.2, 2.3);
+        if (sameSide) K.diveWorld.set(tg.x + gauss() * 0.3, ny, 0);
       }
       // 늦게 뛰는 키퍼는 체중을 미리 싣지 못해 조금 느리고 덜 뻗음
       K.diveRootX = K.av.position.x;
       K.dive = planDive(K.diveWorld, K.av.position.x, K.timing === 'late' ? { reach: PK.Tune.lateReach, time: PK.Tune.lateTime }
         : K.timing === 'early' ? { reach: PK.Tune.earlyReach, time: 1 } : null); // 일찍 = 미리 체중을 실어 더 멀리
-      if (K.autoStay && K.dive.mode === 'center') K.dive.T *= 0.6; // 자동 반응은 공이 거의 왔을 때라 손을 빠르게      K.stepping = false;
+      if (K.autoStay && K.dive.mode === 'center') K.dive.T *= 0.6; // 자동 반응은 공이 거의 왔을 때라 손을 빠르게
+      K.stepping = false;
     }
     // 옆으로 날아가는 다이빙은 실제 골키퍼 다이빙 동작으로 (가운데 버티기·점프는 기존 동작)
-    if (K.dive && K.clipDive === undefined) K.clipDive = K.dive.mode === 'dive' ? setupClipDive(K) : null;
+    if (K.dive && K.clipDive === undefined) {
+      K.clipDive = K.dive.mode === 'dive' ? setupClipDive(K) : null;
+      // 제자리 막기·점프는 실제 골키퍼 자세(받기 동작 / 준비 자세) + 두 손을 공으로
+      K.blockClip = K.dive.mode === 'center' && !!(K.av.userData.anim && PK.PlayerModel.meta && PK.PlayerModel.meta('GkCatch'));
+    }
     keeperPose();
     const ku = K.av.userData;
     if (ku.anim) {
@@ -1135,11 +1145,24 @@ PK.Game = (function () {
       const ready = !K.dive || st.time < K.diveStart; // 다이빙 전: 실제 골키퍼 준비 자세 (옆으로 이동 중엔 기존 스텝 동작)
       // 버티기·제자리 점프 후 공 판정이 끝나면 다시 편한 대기 자세로 (손을 뻗은 채 굳어 있지 않게)
       const settled = K.dive && K.dive.mode === 'center' && st.flight && st.flight.resolved && st.time - K.diveStart > K.dive.T + 0.5;
+      // 실점: 옆으로 날았으면 다이빙 동작을 그대로(착지 → 일어남) 두고, 아니면 편하게 선 자세로 바꾼 뒤 머리를 감싸 쥠
+      const dj = K.dejected && st.time >= K.dejected.t0 && !cel ? K.dejected : null;
       if (cel) ku.anim('Yes', { fade: 0.7 });
+      else if (dj && !(K.clipDive && !ready)) ku.anim('Idle_Loop', { fade: 0.6 });
       else if ((ready && !K.stepping) || settled) ku.anim('GkIdle', { fade: settled ? 0.5 : 0.3 });
       else if (K.clipDive && !ready) ku.anim(K.clipDive.name, { fade: 0.12, phase: clipDiveUpdate(K) });
+      else if (K.blockClip && !ready) { const ph = blockUpdate(K); ku.anim(K.blockLow ? 'GkCatch' : 'GkIdle', K.blockLow ? { fade: 0.12, phase: ph } : { fade: 0.12 }); }
       else ku.anim(null, { fade: ready ? 0.25 : 0.15 });
       if (cel || settled || !K.clipDive || ready) ku.postAnim = null; // 두 손 모으기는 다이빙 중에만
+      if (K.blockClip && !ready && !settled && !cel && !dj) { const bw = K.blockW || 0; ku.postAnim = (B) => blockHands(B, bw, K); }
+      if (dj) {
+        // 다이빙했으면 땅에 떨어진 뒤부터 (날아가는 중에 손이 머리로 가지 않게)
+        const landed = !K.clipDive || ready || (K.clipCt || 0) >= K.clipDive.tl + 0.35;
+        if (landed && dj.w0 === undefined) dj.w0 = st.time;
+        const w = dj.w0 === undefined ? 0 : easeInOut(clamp((st.time - dj.w0) / 0.7, 0, 1));
+        const prev = ku.postAnim, tt = st.time;
+        if (w > 0) ku.postAnim = (B) => { if (prev) prev(B); handsOnHead(B, w, tt); };
+      }
     }
     if (!(K.celebrate && st.time >= K.celebrate.t0)) {
       K.last = { hx: P.hips.position.x, hy: P.hips.position.y, rz: P.hips.rotation.z };
@@ -1199,6 +1222,7 @@ PK.Game = (function () {
     const s1 = 1 - Math.pow(1 - u, PK.Tune.clipDiveEase + 0.5), s2 = sm(cd.ts, cd.tl, ct); // 목표 쪽으로 옮기는 것도 조금 앞쪽에 몰아서
     const r = roll * s1 * (1 - s2), H = 0.85; // 골반 높이쯤을 중심으로 회전
     const p = PK.PlayerModel.pathAt(cd.name, ct);
+    K.clipCt = ct;
     K.av.scale.x = cd.mir;
     K.av.rotation.z = r;
     // 두 손 모으기: 날아가는 동안 오른손을 왼손 옆으로 (착지 후 풀어 줌)
@@ -1222,6 +1246,118 @@ PK.Game = (function () {
     _gq.setFromUnitVectors(a, b);
     up.quaternion.premultiply(_gq);
     up.updateMatrixWorld(true);
+  }
+
+  // ---------- 실점한 키퍼: 두 손으로 머리를 감싸 쥐고 고개를 떨굼 (동작 위에 덧붙임, 비율 w) ----------
+  //  팔은 어깨-팔꿈치-손목 두 마디 IK: 손을 정수리 양옆으로, 팔꿈치는 바깥·앞쪽으로 벌어지게
+  const _dj = { v: Array.from({ length: 12 }, () => new V3()), q: new THREE.Quaternion(), q2: new THREE.Quaternion() };
+  function rotateBoneWorld(bone, from, to) { // 뼈를 월드 기준으로 돌려 방향 from → to
+    const q = _dj.q.setFromUnitVectors(from.clone().normalize(), to.clone().normalize());
+    const pw = bone.parent.getWorldQuaternion(_dj.q2);
+    const bw = bone.getWorldQuaternion(new THREE.Quaternion());
+    bone.quaternion.copy(pw.clone().invert().multiply(q.multiply(bw)));
+    bone.updateMatrixWorld(true);
+  }
+  // 팔 두 마디 IK: 손목을 T 로, 팔꿈치는 pole 쪽으로 굽힘 (월드 좌표)
+  function armIK(B, s, T, pole) {
+    const ua = B['upperarm_' + s], la = B['lowerarm_' + s], hd = B['hand_' + s];
+    const S = ua.getWorldPosition(new V3()), E = la.getWorldPosition(new V3()), H = hd.getWorldPosition(new V3());
+    const L1 = S.distanceTo(E), L2 = E.distanceTo(H);
+    const dv = T.clone().sub(S); let d = dv.length(); dv.normalize();
+    d = clamp(d, Math.abs(L1 - L2) + 0.01, L1 + L2 - 0.003);
+    const a = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+    const perp = pole.clone().addScaledVector(dv, -pole.dot(dv)); if (perp.lengthSq() < 1e-8) return; perp.normalize();
+    const E2 = S.clone().addScaledVector(dv, L1 * Math.cos(a)).addScaledVector(perp, L1 * Math.sin(a));
+    rotateBoneWorld(ua, E.clone().sub(S), E2.clone().sub(S));
+    const E3 = la.getWorldPosition(new V3()), H3 = hd.getWorldPosition(new V3());
+    const T2 = S.clone().addScaledVector(dv, d); // 닿지 않으면 그 방향으로 끝까지
+    rotateBoneWorld(la, H3.clone().sub(E3), T2.sub(E3));
+  }
+
+  // ---------- 가운데 막기: 실제 골키퍼 받기 동작(무릎을 굽혀 자세를 낮춤) + 두 손을 공이 오는 자리로 ----------
+  //  예전에는 관절을 직접 꺾은 자세라 다리가 곧게 서고 팔만 뻣뻣하게 내민 채 굳어 보였음
+  const BLOCK = { p0: 0.06, low: 0.36 }; // GkCatch 재생 위치: 준비 → 낮게 떠받기
+  function blockUpdate(K) {
+    const d = K.dive, tau = Math.max(0, st.time - K.diveStart);
+    if (d.rootX0 === undefined) d.rootX0 = K.av.position.x;
+    const u = clamp(tau / d.T, 0, 1), e = 1 - Math.pow(1 - u, 2.2);
+    const ty = K.re ? K.re.y : d.D.y, tx = K.re ? K.re.x : d.D.x;
+    // 공 쪽으로 반 발짝 (최대 30cm), 몸도 살짝 기울임
+    const shift = clamp(tx, -0.5, 0.5) * 0.6 * e;
+    K.av.position.x = d.rootX0 + shift; K.av.scale.x = 1;
+    // 높은 공 점프: 기존과 같은 궤적으로 몸 전체를 띄움 (가장 높은 곳에서 0.15초 머문 뒤 0.3초에 걸쳐 착지)
+    if (d.jump) {
+      const f = clamp(tau / d.T, 0, 1), land = clamp((tau - d.T - 0.15) / 0.3, 0, 1);
+      const jumpY = lerp(lerp(0.89, d.H.y, e) + Math.sin(f * Math.PI) * 0.1, 0.86, land * land);
+      K.av.position.y = Math.max(0, jumpY - 0.89);
+    } else K.av.position.y = 0;
+    K.av.rotation.z = -clamp(tx - shift, -0.5, 0.5) * 0.18 * e;
+    // 낮은 공: 받기 동작의 '무릎 굽혀 떠받기'. 허리 위 공: 골키퍼 준비 자세(무릎 굽힘, 상체 세움) 그대로 두 손만 공으로
+    K.blockLow = ty < 0.7;
+    K.blockW = e;
+    return BLOCK.p0 + (BLOCK.low - BLOCK.p0) * e;
+  }
+  function blockHands(B, w, K) {
+    if (!B.hand_l || w <= 0.001) return;
+    const d = K.dive, tx = (d.rootX0 || 0) + (K.re ? K.re.x : d.D.x), ty = clamp(K.re ? K.re.y : d.D.y, 0.12, 2.4);
+    const lp = B.hand_l.getWorldPosition(new V3()), rp = B.hand_r.getWorldPosition(new V3());
+    const sideL = Math.sign(lp.x - rp.x) || 1; // 왼손이 월드 +x 쪽인지
+    const z = KEEPER_Z + 0.34 - Math.max(0, 0.6 - ty) * 0.15; // 몸 앞, 낮은 공은 조금 더 몸 가까이
+    ['l', 'r'].forEach((s) => {
+      const sg = s === 'l' ? sideL : -sideL;
+      const H = (s === 'l' ? lp : rp);
+      // 낮은 공은 어깨 바로 아래(발 앞)로 손을 내려야 바닥까지 닿음
+      const sz = ty < 0.7 ? Math.max(z, B['upperarm_' + s].getWorldPosition(new V3()).z - 0.04) : z;
+      const goal = new V3(tx + sg * 0.085, ty, sz);
+      const T = H.clone().lerp(goal, w);
+      // 팔꿈치: 바깥·아래로 (높은 공은 바깥·앞)
+      const pole = new V3(sg, ty > 1.3 ? -0.2 : -0.7, ty > 1.3 ? 0.4 : 0.2);
+      armIK(B, s, T, pole);
+      // 머리 위 공: 손목을 펴서 손가락이 위로 (손바닥으로 공을 받게). 손이 아래로 꺾여 있으면 그만큼 낮게 닿음
+      if (ty > 1.5 && B['middle_01_' + s]) {
+        const k = clamp((ty - 1.5) / 0.4, 0, 1) * w;
+        const e3 = B['lowerarm_' + s].getWorldPosition(new V3()), h3 = B['hand_' + s].getWorldPosition(new V3()), m3 = B['middle_01_' + s].getWorldPosition(new V3());
+        const want = h3.clone().sub(e3).normalize().lerp(m3.clone().sub(h3).normalize(), 1 - k);
+        rotateBoneWorld(B['hand_' + s], m3.sub(h3), want);
+      }
+    });
+  }
+  function handsOnHead(B, w, t) {
+    if (!B.Head || !B.head_end || !B.upperarm_l || !B.neck_01) return;
+    const [head, top, side, up, fwd, tmp] = _dj.v;
+    // 고개 떨구기 (먼저: 손 목표가 숙인 머리를 따라가게)
+    B.Head.getWorldPosition(head); B.head_end.getWorldPosition(top);
+    up.subVectors(top, head).normalize();
+    B.upperarm_l.getWorldPosition(side).sub(B.upperarm_r.getWorldPosition(tmp)).normalize();
+    fwd.crossVectors(side, up).normalize();
+    const rootF = tmp.set(0, 0, 1).applyQuaternion(st.K.av.getWorldQuaternion(_dj.q2));
+    if (fwd.dot(rootF) < 0) fwd.negate();
+    const bow = (0.38 + 0.05 * Math.sin(t * 2.2)) * w; // 천천히 고개를 저으며 숙임
+    const neckQ = new THREE.Quaternion().setFromAxisAngle(new V3().crossVectors(up, fwd).normalize(), bow);
+    const nb = B.neck_01, npw = nb.parent.getWorldQuaternion(new THREE.Quaternion());
+    nb.quaternion.copy(npw.clone().invert().multiply(neckQ.multiply(nb.getWorldQuaternion(new THREE.Quaternion()))));
+    nb.updateMatrixWorld(true);
+    B.Head.getWorldPosition(head); B.head_end.getWorldPosition(top);
+    up.subVectors(top, head).normalize();
+    fwd.crossVectors(side, up).normalize(); if (fwd.dot(rootF) < 0) fwd.negate();
+    ['l', 'r'].forEach((s) => {
+      const sg = s === 'l' ? 1 : -1;
+      const ua = B['upperarm_' + s], la = B['lowerarm_' + s], hd = B['hand_' + s];
+      const S = ua.getWorldPosition(new V3()), E = la.getWorldPosition(new V3()), H = hd.getWorldPosition(new V3());
+      const L1 = S.distanceTo(E), L2 = E.distanceTo(H);
+      // 손 목표: 정수리 조금 아래 옆 (손바닥이 머리 옆·뒤를 감쌈)
+      const goal = top.clone().lerp(head, 0.32).addScaledVector(side, sg * 0.075).addScaledVector(fwd, -0.015);
+      const T = H.clone().lerp(goal, w);
+      const dv = T.clone().sub(S); let d = dv.length(); dv.normalize();
+      d = clamp(d, Math.abs(L1 - L2) + 0.01, L1 + L2 - 0.005);
+      const a = Math.acos(clamp((L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), -1, 1));
+      const pole = side.clone().multiplyScalar(sg).addScaledVector(fwd, 0.45).addScaledVector(up, -0.2);
+      const perp = pole.addScaledVector(dv, -pole.dot(dv)).normalize();
+      const E2 = S.clone().addScaledVector(dv, L1 * Math.cos(a)).addScaledVector(perp, L1 * Math.sin(a));
+      rotateBoneWorld(ua, E.clone().sub(S), E2.clone().sub(S));
+      const E3 = la.getWorldPosition(new V3()), H3 = hd.getWorldPosition(new V3());
+      rotateBoneWorld(la, H3.clone().sub(E3), T.clone().sub(E3));
+    });
   }
 
   // 세리머니·대기 자세로 바뀔 때만 섞음 (다이빙·버티기는 판정 범위와 정확히 일치해야 하므로 섞지 않음)
@@ -1291,7 +1427,9 @@ PK.Game = (function () {
       const tx = st.shot.target.x - (K.clipDive ? K.clipDive.rootX : K.av.position.x), ty = st.shot.target.y;
       const step = (cur, goal, rate) => cur + clamp(goal - cur, -rate * kdt, rate * kdt);
       K.re.x = step(K.re.x, clamp(tx, d.D.x - PK.Tune.readX, d.D.x + PK.Tune.readX), PK.Tune.readRate);
-      K.re.y = step(K.re.y, clamp(ty, d.D.y - PK.Tune.readY, d.D.y + PK.Tune.readY), PK.Tune.readRate);
+      // 높이: 사람이 위·아래를 직접 골랐으면 보정은 조금만 (높게 뛰었는데 손이 바닥까지 내려와 막는 일이 없게)
+      const rY = K.manual && K.chosenV ? PK.Tune.readYChosen : PK.Tune.readY;
+      K.re.y = step(K.re.y, clamp(ty, d.D.y - rY, d.D.y + rY), PK.Tune.readRate);
     }
 
     if (d.mode === 'center') {
@@ -1414,8 +1552,8 @@ PK.Game = (function () {
     let knL = pt(P.kneeL, 0, 0, 0), knR = pt(P.kneeR, 0, 0, 0);
     let ftL = pt(P.footL, 0, -0.02, 0.06), ftR = pt(P.footR, 0, -0.02, 0.06);
     const B = K.av.userData.bones;
-    if (K.clipDive && B && st.time >= K.diveStart) {
-      // 실제 다이빙 동작 중: 보이는 몸의 뼈 위치로 판정 (보이는 손에 맞으면 막힘)
+    if ((K.clipDive || K.blockClip) && B && st.time >= K.diveStart) {
+      // 실제 다이빙·받기 동작 중: 보이는 몸의 뼈 위치로 판정 (보이는 손에 맞으면 막힘)
       const w = (n) => B[n].getWorldPosition(new V3());
       const mid = (a, b) => w(a).add(w(b)).multiplyScalar(0.5);
       hips = w('pelvis'); neck = w('neck_01');
@@ -1750,11 +1888,12 @@ PK.Game = (function () {
     if (goal) { PK.Audio.cheer(); S.crowd.excite = 1; } else { PK.Audio.groan(); S.crowd.excite = cls === 'save' ? 0.85 : 0.6; }
     st.Kk.react = { t0: st.time, good: goal };
     if (cls === 'save') st.K.celebrate = { t0: st.time + 0.6 }; // 잠시 후 일어나서 환호
+    else if (goal) st.K.dejected = { t0: st.time + 0.25 };       // 실점: 머리를 감싸 쥐고 아쉬워함
     // 리플레이 느낌의 카메라
     const b = st.ball.p;
     setCam(new V3(goal ? 4.5 : -4.5, 2.0, 6.5), new V3(b.x * 0.5, 1.0, Math.min(b.z, 2)), 1.2);
     st.state = 'result';
-    later(2.8, () => { S.crowd.excite = 0; nextKick(); });
+    later(goal ? 3.3 : 2.8, () => { S.crowd.excite = 0; nextKick(); }); // 골이면 키퍼가 아쉬워하는 모습까지 조금 더 보여 줌
   }
 
   // ---------- 슛 지도 (경기 후, 키커 시점에서 본 골대 위에 찬 위치와 결과) ----------

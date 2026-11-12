@@ -1255,6 +1255,43 @@ diffuseColor.rgb = col;`)
       });
     }
 
+    // 다리 겹침 풀기: 다리를 굵게 다듬은 뒤로, 동작 데이터(원래 가는 다리 기준)에서 두 다리가 가까워지는 순간
+    //  (다이빙 착지·누운 자세 등) 무릎·허벅지가 서로 파고들어 엉켜 보임 → 겹친 만큼만 엉덩이 관절에서 다리를 벌려 떼어 놓음
+    const LEG_R = { th: 0.082, ca: 0.056 }; // 허벅지·종아리 굵기(반지름, m)
+    const segClosest = (p1, q1, p2, q2, oa, ob) => { // 두 선분의 가장 가까운 점
+      const d1 = shV[0].subVectors(q1, p1), d2 = shV[1].subVectors(q2, p2), r = shV[2].subVectors(p1, p2);
+      const a = d1.dot(d1), e = d2.dot(d2), f = d2.dot(r), c = d1.dot(r), b = d1.dot(d2), den = a * e - b * b;
+      let s = den > 1e-9 ? Math.min(1, Math.max(0, (b * f - c * e) / den)) : 0, t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = Math.min(1, Math.max(0, -c / a)); } else if (t > 1) { t = 1; s = Math.min(1, Math.max(0, (b - c) / a)); }
+      oa.copy(p1).addScaledVector(d1, s); ob.copy(p2).addScaledVector(d2, t);
+      return oa.distanceTo(ob);
+    };
+    function pushLeg(sd, p, n, amt) { // 엉덩이 관절을 중심으로 다리를 돌려 점 p 를 n 쪽으로 amt 만큼
+      const th = B['thigh_' + sd], h = wp(th), r = p.clone().sub(h), L = r.length();
+      if (L < 0.05) return;
+      const axis = r.cross(n); if (axis.lengthSq() < 1e-10) return; axis.normalize();
+      const q = new THREE.Quaternion().setFromAxisAngle(axis, Math.min(0.35, amt / L));
+      th.quaternion.copy(wq(th.parent).invert().multiply(q.multiply(wq(th))));
+      th.updateMatrixWorld(true);
+    }
+    function separateLegs() {
+      if (!B.thigh_l || !B.thigh_r || !B.calf_l || !B.calf_r || !B.foot_l || !B.foot_r) return;
+      const pa = new THREE.Vector3(), pb = new THREE.Vector3(), ba = new THREE.Vector3(), bb = new THREE.Vector3();
+      for (let it = 0; it < 3; it++) {
+        model.updateMatrixWorld(true);
+        const hl = wp(B.thigh_l), kl = wp(B.calf_l), fl = wp(B.foot_l), hr = wp(B.thigh_r), kr = wp(B.calf_r), fr = wp(B.foot_r);
+        const S = [[hl, kl, LEG_R.th, hr, kr, LEG_R.th], [kl, fl, LEG_R.ca, kr, fr, LEG_R.ca], [hl, kl, LEG_R.th, kr, fr, LEG_R.ca], [kl, fl, LEG_R.ca, hr, kr, LEG_R.th]];
+        let worst = 0;
+        S.forEach(([a1, a2, ra, b1, b2, rb]) => {
+          const d = segClosest(a1, a2, b1, b2, pa, pb), over = ra + rb - d;
+          if (over > worst) { worst = over; ba.copy(pa); bb.copy(pb); }
+        });
+        if (worst < 0.004) break;
+        const n = ba.clone().sub(bb); if (n.lengthSq() < 1e-8) n.copy(hl).sub(hr); n.normalize();
+        pushLeg('l', ba, n, worst * 0.55); pushLeg('r', bb, n.negate(), worst * 0.55);
+      }
+    }
+
     root.userData.sync = function () {
       // 좌우를 뒤집은 선수(가로 배율 −1, 반대쪽 다이빙)는 월드 회전값이 뒤틀려 계산돼 쇄골·팔이 꼬임
       //  → 뼈 계산은 뒤집지 않은 상태에서 하고(뼈 회전은 부모 기준이라 그대로 맞음), 끝나면 다시 뒤집음
@@ -1281,6 +1318,7 @@ diffuseColor.rgb = col;`)
       applyAnim();
       spreadArmTwist();
       liftShoulders();
+      separateLegs();
       // 게임이 동작 위에 덧붙이는 손질 (예: 다이빙 중 두 손을 모음)
       if (root.userData.postAnim) { model.updateMatrixWorld(true); root.userData.postAnim(B); }
     }
