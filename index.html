@@ -87,6 +87,19 @@
       <div class="custom-list" id="custom-list"></div>
       <p class="custom-help">↑↓ 항목 선택 · ←→ 변경</p>
     </div>
+
+    <!-- 넓은 화면 전용 오른쪽 패널: 내 기록 · 최근 경기 · 조작법 (조작법은 JS 가 옮겨 옴) -->
+    <aside class="lobby-info" id="lobby-info" aria-label="내 기록과 최근 경기">
+      <section class="info-card">
+        <h3>내 기록</h3>
+        <div id="stats-body"></div>
+      </section>
+      <section class="info-card">
+        <h3>최근 경기</h3>
+        <div id="last-body"></div>
+      </section>
+      <div id="help-slot"></div>
+    </aside>
   </section>
 
   <!-- ================= 게임 HUD ================= -->

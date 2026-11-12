@@ -1768,15 +1768,16 @@ PK.Game = (function () {
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const svgEl = (name, attrs, parent) => { const e = document.createElementNS(SVG_NS, name); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
   // 한 팀의 슛 지도 카드 (mini = 킥 준비 중 화면 구석에 띄우는 작은 버전)
-  function shotCard(team, mini) {
+  function shotCard(team, mini, log, teams) {
     const SX = (x) => (x + 4.6) * 100, SY = (y) => (3.3 - y) * 100;
-    const shots = (st.shotLog || []).filter((k) => k.team === team);
+    teams = teams || st.teams;
+    const shots = (log || st.shotLog || []).filter((k) => k.team === team);
     const card = document.createElement('div');
     card.className = 'sm-card' + (mini ? ' mini' : '');
     const head = document.createElement('div');
     head.className = 'sm-head';
     const name = document.createElement('b');
-    const teamName = st.teams[team] ? st.teams[team].name : (team + 1) + 'P';
+    const teamName = teams[team] ? teams[team].name : (team + 1) + 'P';
     name.textContent = mini ? teamName + ' 킥 전적' : teamName;
     const tally = document.createElement('span'); tally.textContent = `${shots.filter((k) => k.cls === 'goal').length} / ${shots.length} 골`;
     head.append(name, tally);
@@ -1832,6 +1833,18 @@ PK.Game = (function () {
     hideKickUI();
     setText('role-banner', ''); setText('instruction', '');
     const humanWin = online() ? isLocal(w) : st.teams[w].human;
+    // 내 기록 저장 (사람이 한쪽인 경기만: 싱글·토너먼트·온라인). 로비 오른쪽 '내 기록'·'최근 경기'에 보여 줌
+    const mine = [0, 1].filter((t) => (online() ? isLocal(t) : st.teams[t].human));
+    if (mine.length === 1 && PK.Stats) {
+      const m = mine[0], o = 1 - m;
+      PK.Stats.record({
+        mode: st.tour ? 'tournament' : online() ? 'online' : 'single',
+        stage: st.tour ? st.tour.roundName : '',
+        win: w === m, my: goals(m), opp: goals(o), sudden: st.kicks[0].length > 5,
+        myName: st.teams[m].name, oppName: st.teams[o].name,
+        log: (st.shotLog || []).map((k) => ({ team: k.team === m ? 0 : 1, n: k.n, x: +k.x.toFixed(2), y: +k.y.toFixed(2), cls: k.cls, text: k.text, type: k.type })),
+      });
+    }
     let title = st.mode === 'multi' ? `${st.teams[w].name} 승리! 🏆` : (humanWin ? '승리! 🏆' : '패배…');
     $('btn-again').textContent = '다시 하기';
     if (st.tour) {
@@ -2027,5 +2040,5 @@ PK.Game = (function () {
     st.state = 'end';
   }
 
-  return { init, start, update, quit, opponentLeft, get active() { return st.active; }, _st: st, _shotMap: renderShotMap, _test: { planDive, keeperPose, keeperCapsules, scene: () => scene } };
+  return { init, start, update, quit, opponentLeft, shotCard, get active() { return st.active; }, _st: st, _shotMap: renderShotMap, _test: { planDive, keeperPose, keeperCapsules, scene: () => scene } };
 })();

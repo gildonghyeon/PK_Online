@@ -55,6 +55,44 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 .controls-help b { color: var(--accent); margin-right: 6px; }
 
 .lobby-right { width: min(460px, 42vw); padding: 4vh 3vw 3vh 0; display: flex; flex-direction: column; gap: 10px; }
+
+/* 오른쪽 정보 패널 (넓은 화면 전용): 내 기록 · 최근 경기 · 조작법 */
+.lobby-info { display: none; }
+.info-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+.info-card h3 { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-weight: 400; font-size: 21px; margin-bottom: 12px; letter-spacing: .5px; }
+.info-empty { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.stat { background: rgba(255,255,255,.045); border-radius: 10px; padding: 10px 6px 8px; text-align: center; }
+.stat b { display: block; font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-weight: 400; font-size: 30px; line-height: 1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.stat b small { font-size: .55em; margin-left: 1px; }
+.stat span { font-size: 12px; color: var(--muted); }
+.stat-row { display: grid; grid-template-columns: 54px auto 1fr 40px; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 7px 0; }
+.stat-row b { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stat-pct { text-align: right; color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-bar { display: block; height: 7px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; }
+.stat-bar em { display: block; height: 100%; border-radius: 4px; background: var(--accent); }
+.stat-bar.save em { background: var(--gold); }
+.stat-streak { margin-top: 10px; font-size: 13px; color: var(--muted); }
+.stat-streak b { color: var(--text); }
+.stat-modes { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.stat-modes b { color: var(--text); }
+.last-head { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 10px; margin-bottom: 10px; }
+.last-badge { padding: 4px 10px; border-radius: 8px; font-weight: 900; font-size: 14px; }
+.last-badge.win { background: var(--accent); color: #102; }
+.last-badge.lose { background: rgba(255, 77, 94, .18); color: var(--danger); border: 1px solid rgba(255, 77, 94, .5); }
+.last-score { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-weight: 400; font-size: 28px; font-variant-numeric: tabular-nums; }
+.last-meta { font-size: 12px; color: var(--muted); line-height: 1.45; min-width: 0; overflow-wrap: anywhere; }
+.last-keeper { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.last-keeper b { color: var(--gold); }
+#last-body .sm-card { padding: 8px 10px 6px; }
+
+@media (min-width: 1280px) and (min-height: 600px) {
+  /* 게임 메뉴는 왼쪽 끝에 그대로, 남는 폭은 가운데 선수 미리보기가 늘어나 채우고, 정보 패널은 오른쪽 끝 */
+  .lobby-left { flex: 0 0 auto; width: min(560px, 32vw); padding: 6vh 2vw 5vh 5vw; }
+  .lobby-right { flex: 1 1 auto; width: auto; max-width: 720px; margin: 0 auto; padding: 4vh 1.5vw 3vh; }
+  .lobby-info { display: flex; flex-direction: column; gap: 14px; flex: 0 0 auto; width: min(380px, 24vw); padding: 4vh 3vw 3vh 0; overflow-y: auto; }
+  .lobby-info .controls-help { margin-top: 0; }
+}
 .player-tabs { display: flex; gap: 8px; }
 .player-tabs button { flex: 1; padding: 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); font-weight: 700; }
 .player-tabs button.on { border-color: var(--accent2); color: var(--accent2); }
