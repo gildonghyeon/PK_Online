@@ -371,8 +371,8 @@ body.touch .btn-action { right: calc(28px + env(safe-area-inset-right, 0px)); bo
 html, body, button { touch-action: manipulation; -webkit-text-size-adjust: 100%; }
 
 /* 조준점 파워 링: 조준점을 둘러싸고 누르는 동안 차오름 (킥 패널의 파워 바는 숨김) */
-.aim-power { position: absolute; left: -32px; top: -32px; width: 64px; height: 64px; pointer-events: none; will-change: transform; }
-.aim-power svg { transform: rotate(-90deg); overflow: visible; }
+.aim-power { position: absolute; left: -24px; top: -24px; width: 48px; height: 48px; pointer-events: none; will-change: transform; }
+.aim-power svg { width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
 .aim-power circle { fill: none; stroke-width: 6; }
 .ap-track { stroke: rgba(0, 0, 0, .45); }
 /* 구간 색: 약함(파랑) · 적절(초록) · 위험(빨강) — 바탕은 흐리게, 채워지는 부분은 같은 색으로 진하게 */

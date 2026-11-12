@@ -428,8 +428,8 @@ if (vPart > 1.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;`);
     // 조준용 마커
     const ringM = new THREE.MeshBasicMaterial({ color: '#c6ff3d', transparent: true, opacity: 0.9, depthTest: false });
     const aim = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.17, 0.22, 32), ringM);
-    const dotM = new THREE.Mesh(new THREE.CircleGeometry(0.04, 16), ringM);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.125, 0.165, 32), ringM); // 조준 원 (지름 33cm)
+    const dotM = new THREE.Mesh(new THREE.CircleGeometry(0.03, 16), ringM);
     aim.add(ring, dotM);
     aim.renderOrder = 10; ring.renderOrder = 10; dotM.renderOrder = 10;
     scene.add(aim);
