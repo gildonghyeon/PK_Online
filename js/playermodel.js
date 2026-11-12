@@ -287,6 +287,200 @@ PK.PlayerModel = (function () {
       for (let i = 0; i < lb.count; i++) { if (lb.getX(i) <= 0) continue; sx += lb.getX(i); sy += lb.getY(i); sz += lb.getZ(i); n++; }
       if (n) faceInfo.eye.set(sx / n, sy / n, sz / n);
     }
+    try { buildHairShells(B); } catch (e) { console.warn('hair shells', e); }
+  }
+
+  // ---------- 헤어스타일 ----------
+  //  0 숏컷 = 원래 머리카락 메시. 나머지는 몸 메시의 두피(원래 머리카락이 덮던 자리)를 바깥으로 부풀린 '머리 껍질'을 만들어
+  //  같은 뼈대로 움직이게 함 (머리와 한 몸처럼 따라감). 스타일마다 두께 분포·짧게 민 부분(두피 비침)이 다름
+  const hairGeos = {}, hairCardGeos = {};
+  let hairC = null; // 머리 중심 (기본 자세 모델 좌표, m)
+  function buildHairShells(B) {
+    const bodyName = Object.keys(meshKind).find((k) => meshKind[k] === KIND.body);
+    const hairName = Object.keys(meshKind).find((k) => meshKind[k] === KIND.hair);
+    if (!bodyName || !hairName || !B.Head) return;
+    let bodyMesh = null; base.scene.traverse((o) => { if (o.isSkinnedMesh && o.name === bodyName) bodyMesh = o; });
+    const headIdx = bodyMesh ? bodyMesh.skeleton.bones.indexOf(B.Head) : -1;
+    const g = kitGeos[bodyName], bd = g.attributes.aBind, pa = g.attributes.aPart, si = g.attributes.skinIndex, sw = g.attributes.skinWeight;
+    const hb = kitGeos[hairName].attributes.aBind;
+    const nose = faceInfo.nose;
+    // 같은 자리 정점(텍스처 이음매)을 하나로 묶음 → 껍질이 갈라지지 않게
+    const weld = new Map(), wOf = new Int32Array(bd.count).fill(-1), P = [], SI = [], SW = [];
+    for (let i = 0; i < bd.count; i++) {
+      if (pa.getX(i) !== 0 || bd.getY(i) < nose.y - 0.07) continue;
+      const k = Math.round(bd.getX(i) * 2e4) + ',' + Math.round(bd.getY(i) * 2e4) + ',' + Math.round(bd.getZ(i) * 2e4);
+      let w = weld.get(k);
+      if (w === undefined) { w = P.length; weld.set(k, w); P.push(new THREE.Vector3(bd.getX(i), bd.getY(i), bd.getZ(i))); SI.push([si.getX(i), si.getY(i), si.getZ(i), si.getW(i)]); SW.push([sw.getX(i), sw.getY(i), sw.getZ(i), sw.getW(i)]); }
+      wOf[i] = w;
+    }
+    const idx = g.index ? g.index.array : null; if (!idx) return;
+    const tris = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = wOf[idx[t]], b = wOf[idx[t + 1]], c = wOf[idx[t + 2]];
+      if (a >= 0 && b >= 0 && c >= 0 && a !== b && b !== c && a !== c) tris.push(a, b, c);
+    }
+    // 매끈한 법선 (묶은 정점 기준)
+    const N = P.map(() => V3()), e1 = V3(), e2 = V3(), fn = V3();
+    for (let t = 0; t < tris.length; t += 3) {
+      e1.subVectors(P[tris[t + 1]], P[tris[t]]); e2.subVectors(P[tris[t + 2]], P[tris[t]]); fn.crossVectors(e1, e2);
+      N[tris[t]].add(fn); N[tris[t + 1]].add(fn); N[tris[t + 2]].add(fn);
+    }
+    N.forEach((n) => n.normalize());
+    // 머리 중심: 정수리에서 머리 반지름(약 10.5cm)만큼 아래
+    let topY = -9, zs = 0, zn = 0; P.forEach((p) => { topY = Math.max(topY, p.y); });
+    P.forEach((p) => { if (p.y > topY - 0.03) { zs += p.z; zn++; } });
+    hairC = new THREE.Vector3(0, topY - 0.105, zn ? zs / zn : 0);
+    // 원래 머리카락이 덮던 두피인지 (두피에서 머리 중심 반대 방향 4cm 안에 머리카락 정점이 있으면 덮임)
+    const H = []; for (let i = 0; i < hb.count; i++) H.push(new THREE.Vector3(hb.getX(i), hb.getY(i), hb.getZ(i)));
+    const cover = new Float32Array(P.length), d = V3(), r = V3();
+    P.forEach((p, i) => {
+      if (p.y < hairC.y - 0.09) return;
+      d.subVectors(p, hairC).normalize();
+      for (let j = 0; j < H.length; j++) {
+        r.subVectors(H[j], p); const t = r.dot(d);
+        if (t < -0.004 || t > 0.04) continue;
+        if (r.addScaledVector(d, -t).lengthSq() < 0.009 * 0.009) { cover[i] = 1; break; }
+      }
+    });
+    // 이웃끼리 평균내서 머리선이 부드럽게
+    const nb = P.map(() => new Set());
+    for (let t = 0; t < tris.length; t += 3) for (let k = 0; k < 3; k++) { nb[tris[t + k]].add(tris[t + (k + 1) % 3]); nb[tris[t + k]].add(tris[t + (k + 2) % 3]); }
+    let W = cover;
+    for (let it = 0; it < 6; it++) { const W2 = new Float32Array(W.length); W.forEach((w, i) => { let s = w, c = 1; nb[i].forEach((j) => { s += W[j]; c++; }); W2[i] = s / c; }); W = W2; }
+    // 머리 부분 삼각형만 고르고 한 번 잘게 나눔 (가운데 줄무늬 같은 모양도 매끈하게)
+    let vP = [], vN = [], vW = [], vS = [], vSW = [], T = [];
+    const keep = [];
+    for (let t = 0; t < tris.length; t += 3) { if (W[tris[t]] + W[tris[t + 1]] + W[tris[t + 2]] > 0.25) keep.push(tris[t], tris[t + 1], tris[t + 2]); }
+    const remap = new Map();
+    const vid = (i) => { let v = remap.get(i); if (v === undefined) { v = vP.length; remap.set(i, v); vP.push(P[i].clone()); vN.push(N[i].clone()); vW.push(W[i]); vS.push(SI[i]); vSW.push(SW[i]); } return v; };
+    const mid = new Map();
+    const midOf = (a, b) => { const k = a < b ? a + '_' + b : b + '_' + a; let v = mid.get(k); if (v === undefined) { v = vP.length; mid.set(k, v); vP.push(vP[a].clone().add(vP[b]).multiplyScalar(0.5)); vN.push(vN[a].clone().add(vN[b]).normalize()); vW.push((vW[a] + vW[b]) / 2); vS.push(vS[a]); vSW.push(vSW[a]); } return v; };
+    for (let t = 0; t < keep.length; t += 3) {
+      const a = vid(keep[t]), b = vid(keep[t + 1]), c = vid(keep[t + 2]);
+      const ab = midOf(a, b), bc = midOf(b, c), ca = midOf(c, a);
+      T.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+    }
+    const inv = meshInvW[bodyName];
+    const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+    // 스타일별 밑바탕 껍질 두께(m) · 두피 비침(0~1). 머리카락 결은 원래 머리카락 메시를 눌러/세워서 위에 얹음 (아래 CARD)
+    const topOf = (q) => sm(0.12, 0.42, q.y);
+    const mohOf = (p, q) => sm(0.03, 0.014, Math.abs(p.x)) * sm(-0.5, -0.15, q.y);
+    //  버즈컷·투블럭은 몸의 두피 텍스처(짧은 머리색)가 이미 자연스러워 껍질 없이 머리카락만 눌러 씀. 묶음머리는 묶은 뭉치만
+    //  바짝 민 두피(삭발·모히칸 옆·투블럭 옆)는 몸 재질에서 피부가 비치게 칠함 (uShave)
+    const STYLE = {
+      // 아프로: 둥글게 부푼 곱슬 (앞이마 쪽은 낮게, 표면은 울퉁불퉁한 곱슬 뭉치)
+      4: (p, q) => {
+        const lump = 0.0045 * (Math.sin(p.x * 140 + 1.3) * Math.sin(p.y * 150 + 0.7) * Math.sin(p.z * 135 + 2.1)) + 0.003 * Math.sin(p.x * 310 + p.z * 270) * Math.sin(p.y * 290 + 1.1);
+        return [(0.036 + 0.016 * sm(-0.4, 0.8, q.y)) * (1 - 0.55 * sm(0.25, 0.9, q.z)) + lump, 0];
+      },
+      5: null, // 묶음머리 (뒤로 넘겨 묶음): 묶은 뭉치만
+    };
+    // 원래 머리카락 메시(가닥 텍스처)를 스타일에 맞게: 두피에서의 높이(off)를 새 높이로. null 이면 두피 속으로 숨김
+    const CARD = {
+      1: (off, p, q) => 0.0035 + off * 0.1,
+      2: (off, p, q) => { const t = topOf(q); return 0.0035 + off * (0.1 + 1.35 * t) + 0.006 * t; }, // 윗머리는 원래보다 풍성하게
+      3: (off, p, q) => { const f = mohOf(p, q); return f > 0.05 ? 0.003 + off * (0.4 + 1.3 * f) + 0.012 * f : null; },
+      5: (off, p, q) => 0.0035 + off * 0.18,
+    };
+    // 두피 반지름 (방향별): 그 방향에 가장 가까운 두피 정점까지 거리
+    const dirs = P.map((p) => p.clone().sub(hairC)), rad = dirs.map((v) => v.length()); dirs.forEach((v) => v.normalize());
+    const scalpR = (dir) => { let best = -2, r0 = 0.1; for (let i = 0; i < dirs.length; i++) { const c = dirs[i].dot(dir); if (c > best) { best = c; r0 = rad[i]; } } return r0; };
+    const hg0 = kitGeos[hairName], hInv = meshInvW[hairName];
+    const hDir = [], hOff = [], hRs = [], hRel = [];
+    for (let i = 0; i < hb.count; i++) {
+      const rr = new THREE.Vector3(hb.getX(i), hb.getY(i), hb.getZ(i)).sub(hairC), l = rr.length(), dd = rr.clone().multiplyScalar(1 / l), rs = scalpR(dd);
+      hDir.push(dd); hRs.push(rs); hOff.push(Math.max(0, l - rs)); hRel.push(rr);
+    }
+    Object.keys(CARD).forEach((s) => {
+      const cg = hg0.clone(), cp = cg.attributes.position, w = V3();
+      for (let i = 0; i < cp.count; i++) {
+        const h = CARD[s](hOff[i], hRel[i], hDir[i]);
+        const r1 = h === null ? hRs[i] - 0.006 : hRs[i] + h;
+        w.copy(hDir[i]).multiplyScalar(r1).add(hairC).applyMatrix4(hInv);
+        cp.setXYZ(i, w.x, w.y, w.z);
+      }
+      cp.needsUpdate = true; cg.computeBoundingSphere(); // 법선은 원래 가닥 방향 그대로 (빛 받는 느낌 유지)
+      hairCardGeos[s] = cg;
+    });
+    const q = V3(), rel = V3(), o = V3();
+    Object.keys(STYLE).forEach((s) => {
+      s = +s;
+      const pos = [], head = [], fade = [], stub = [], sidx = [], swt = [];
+      if (STYLE[s]) vP.forEach((p, i) => {
+        rel.subVectors(p, hairC); q.copy(rel).normalize();
+        const [t, st] = STYLE[s](rel, q);
+        const tt = Math.min(t, 0.0006) + Math.max(0, t - 0.0006) * (s === 4 ? Math.pow(sm(0.3, 1.0, vW[i]), 0.7) : sm(0.45, 0.98, vW[i])); // 머리선 쪽은 두피에 붙게 얇아짐
+        const mixD = s === 4 ? 0.75 : 0.35;
+        o.copy(vN[i]).multiplyScalar(1 - mixD).addScaledVector(q, mixD).normalize();
+        const w = V3().copy(p).addScaledVector(o, tt);
+        head.push(w.x - hairC.x, w.y - hairC.y, w.z - hairC.z);
+        w.applyMatrix4(inv); pos.push(w.x, w.y, w.z);
+        fade.push(vW[i]); stub.push(st);
+        sidx.push(...vS[i]); swt.push(...vSW[i]);
+      });
+      const idxOut = STYLE[s] ? T.slice() : [];
+      // 묶음머리: 뒤통수 위쪽에 둥근 뭉치 (머리 뼈만 따름)
+      if (s === 5 && headIdx >= 0) {
+        const dir = new THREE.Vector3(0, 0.62, -0.78).normalize();
+        let R = 0.1; vP.forEach((p) => { rel.subVectors(p, hairC); const l = rel.length(); if (rel.multiplyScalar(1 / l).dot(dir) > 0.985) R = Math.max(R, l); });
+        const ctr = hairC.clone().addScaledVector(dir, R + 0.014); // 반쯤 머리에 묻히게
+        const sg = new THREE.SphereGeometry(0.036, 20, 14), sp = sg.attributes.position, base0 = pos.length / 3;
+        for (let i = 0; i < sp.count; i++) {
+          const w = new THREE.Vector3(sp.getX(i), sp.getY(i) * 0.85, sp.getZ(i)).add(ctr);
+          head.push(w.x - hairC.x, w.y - hairC.y, w.z - hairC.z);
+          w.applyMatrix4(inv); pos.push(w.x, w.y, w.z);
+          fade.push(1); stub.push(0); sidx.push(headIdx, 0, 0, 0); swt.push(1, 0, 0, 0);
+        }
+        const si2 = sg.index.array; for (let k = 0; k < si2.length; k++) idxOut.push(base0 + si2[k]);
+      }
+      const hg = new THREE.BufferGeometry();
+      hg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      hg.setAttribute('aHead', new THREE.Float32BufferAttribute(head, 3));
+      hg.setAttribute('aFade', new THREE.Float32BufferAttribute(fade, 1));
+      hg.setAttribute('aStub', new THREE.Float32BufferAttribute(stub, 1));
+      hg.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(sidx, 4));
+      hg.setAttribute('skinWeight', new THREE.Float32BufferAttribute(swt, 4));
+      hg.setIndex(idxOut);
+      hg.computeVertexNormals();
+      hg.computeBoundingSphere();
+      hairGeos[s] = hg;
+    });
+  }
+  // 머리 껍질 재질: 머리카락 결(앞→뒤로 빗은 줄)·아프로 곱슬·짧게 민 두피를 그림으로 그리지 않고 계산해서 칠함
+  function hairShellMaterial(kit, style) {
+    const m = new THREE.MeshStandardMaterial({ skinning: true, roughness: style === 4 ? 0.95 : 0.82, metalness: 0, side: THREE.FrontSide,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }); // 두피 바로 위에 붙어도 깜빡이지 않게
+    const U = { uHairC: { value: kit.hair }, uSkinC: { value: kit.skinBase }, uCurl: { value: style === 4 ? 1 : 0 } };
+    m.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, U);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec3 aHead; attribute float aFade; attribute float aStub;\nvarying vec3 vHead; varying float vFade; varying float vStub;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvHead = aHead; vFade = aFade; vStub = aStub;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+uniform vec3 uHairC; uniform vec3 uSkinC; uniform float uCurl;
+varying vec3 vHead; varying float vFade; varying float vStub;
+float hh(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float n3(vec3 p) {
+  vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(hh(i), hh(i + vec3(1, 0, 0)), f.x), mix(hh(i + vec3(0, 1, 0)), hh(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(hh(i + vec3(0, 0, 1)), hh(i + vec3(1, 0, 1)), f.x), mix(hh(i + vec3(0, 1, 1)), hh(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+  // 머리선: 가장자리를 들쭉날쭉하게 잘라 자연스럽게
+  if (vFade + (n3(vHead * 160.0) - 0.5) * 0.3 < 0.5) discard;
+  // 결: 앞뒤 축을 도는 각도 방향으로 가는 줄 (앞에서 뒤로 빗은 머리). 정수 배 주파수라 이음매 없음
+  float ang = atan(vHead.x, vHead.y);
+  float strand = 0.78 + 0.16 * sin(ang * 97.0 + sin(vHead.z * 55.0) * 2.0) + 0.12 * sin(ang * 223.0 + vHead.z * 30.0) + 0.3 * (n3(vec3(ang * 140.0, vHead.z * 18.0, 0.0)) - 0.5);
+  float curl = 0.5 + 0.7 * n3(vHead * 260.0) * (0.6 + 0.8 * n3(vHead * 90.0));
+  float lum = mix(strand, curl, uCurl);
+  float speck = n3(vHead * 1500.0);
+  // 짧게 민 부분: 머리색 사이로 두피가 비침 (vStub = 두피가 보이는 정도)
+  vec3 hairCol = uHairC * lum;
+  float sk = clamp(vStub * (0.65 + 0.7 * speck), 0.0, 1.0);
+  diffuseColor.rgb = mix(hairCol, uSkinC, sk * sk); // 선형 색이라 제곱해야 눈에 보이는 비율이 맞음`);
+    };
+    return m;
   }
 
   // ---------- 유니폼·피부·머리를 칠하는 재질 (옷 종류별) ----------
@@ -301,6 +495,7 @@ PK.PlayerModel = (function () {
     const U = {
       uKind: { value: kind },
       uSkinTint: { value: k.skinTint }, uHair: { value: k.hair }, uHairLum: { value: hairLum },
+      uShave: { value: k.shave || 0 }, uHairCtr: { value: hairC || new THREE.Vector3(0, -9, 0) }, uScalp: { value: k.skinBase },
       uShirt: { value: k.shirtMap }, uDecal: { value: k.shirtMap && k.shirtMap.pkDecal ? k.shirtMap.pkDecal : k.shirtMap }, uSleeve: { value: k.sleeve }, uTrim: { value: k.trim },
       uShorts: { value: k.shorts }, uStripe: { value: k.stripe }, uSocks: { value: k.socks }, uSockBand: { value: k.sockBand },
       uBoot: { value: k.boot }, uSole: { value: k.sole }, uGlove: { value: k.glove }, uKeeper: { value: k.longSleeve ? 1 : 0 },
@@ -323,6 +518,7 @@ PK.PlayerModel = (function () {
         .replace('#include <common>', `#include <common>
 varying vec3 vBind; varying float vPart; varying float vWall;
 uniform float uKind; uniform vec3 uSkinTint; uniform vec3 uHair; uniform float uHairLum;
+uniform float uShave; uniform vec3 uHairCtr; uniform vec3 uScalp;
 uniform sampler2D uShirt; uniform sampler2D uDecal; uniform vec3 uSleeve; uniform vec3 uTrim; uniform vec3 uShorts; uniform vec3 uStripe;
 uniform vec3 uSocks; uniform vec3 uSockBand; uniform vec3 uBoot; uniform vec3 uSole; uniform vec3 uGlove; uniform float uKeeper;
 uniform float uHem; uniform float uShoulder; uniform float uSockTop; uniform float uNeck; uniform vec4 uNeckFB; uniform float uShortsHem; uniform float uHipZ; uniform vec3 uArm; uniform float uSleevePat; uniform vec3 uSleeve2; uniform float uArmLine; uniform vec3 uMouth; uniform float uModelScale; uniform vec2 uNearFar; uniform float uShout; uniform vec3 uMouthView; uniform vec3 uNose; uniform vec3 uEye; varying vec3 vMouthL;
@@ -386,6 +582,21 @@ if (uKind < 1.5) {                       // 셔츠: 몸통은 무늬 그림, 팔
 } else if (uKind < 5.5) {                // 몸(피부·얼굴·눈): 피부만 원하는 색으로, 키퍼는 손에 장갑
   float sk = smoothstep(0.05, 0.12, s.r - s.b) * smoothstep(0.18, 0.3, lum);
   col = mix(tex, tex * uSkinTint, sk);
+  // 두피에 그려진 짧은 머리(피부색이 아닌 곳): 고른 머리색으로. 헤어스타일에 따라 바짝 민 곳은 피부가 비치게
+  if (vPart < 0.5 && b.y > uEye.y - 0.1 && (b.y > uEye.y + 0.042 || b.z < uEye.z - 0.065 || abs(b.x - uHairCtr.x) > 0.058)) { // 눈썹(눈 위 가운데)은 제외
+    float hp = 1.0 - smoothstep(0.2, 0.6, sk);
+    vec3 hcol = uHair * clamp(dot(tex, vec3(0.299, 0.587, 0.114)) / max(uHairLum, 0.004), 0.45, 2.2);
+    vec3 hq = b - uHairCtr; vec3 hd = normalize(hq);
+    float moh = smoothstep(0.03, 0.014, abs(hq.x)) * smoothstep(-0.5, -0.15, hd.y);
+    float shave = uShave > 2.5 ? 0.75 * (1.0 - smoothstep(0.05, 0.25, hd.y)) : uShave > 1.5 ? 1.0 - moh : uShave > 0.5 ? 1.0 : 0.0;
+    // 민 두피: 피부색 바탕에 원래 그림의 머리 밀도만큼 짧은 털이 거뭇하게 (두피라 얼굴보다 살짝 어둡게)
+    vec3 skinC = uScalp * 0.7;
+    float grain = fract(sin(dot(floor(b * 2500.0), vec3(12.9898, 78.233, 37.719))) * 43758.5453); // 짧은 털 알갱이
+    float stub = clamp(0.5 + (0.3 - lum) * 0.8 + (grain - 0.5) * 0.2, 0.3, 0.72); // 선형 색이라 꽤 섞어야 거뭇하게 보임
+    hcol = mix(hcol, mix(skinC, hcol, stub), shave);
+    // 민 곳은 원래 머리선 가장자리(반쯤 그려진 머리)까지 덮어 테두리 선이 남지 않게
+    col = mix(col, hcol, max(hp, step(0.5, shave) * (1.0 - smoothstep(0.65, 1.0, sk))));
+  }
   if (uKeeper > 0.5 && vPart > 4.5 && vPart < 5.5) col = uGlove * pow(clamp(lum / 0.7, 0.6, 1.1), 2.2);
   // 입속: 입술 안쪽으로 들어갈수록 어둡게 (원래 텍스처는 입속도 입술처럼 분홍이라 입을 벌리면 혀를 내민 것처럼 보임)
   vec3 mq = b - uMouth;
@@ -601,6 +812,8 @@ diffuseColor.rgb = col;`)
       sleevePat: keeper ? 0 : uni.p === 'hoops' ? 1 : uni.p === 'halves' ? 2 : 0,
       sleeve2: lin(keeper ? uni.gk : uni.c2),
       armLine: keeper || uni.p === 'solid' || uni.p === 'chevron' || uni.p === 'sash' ? 1 : 0,
+      // 두피 민 정도: 0 그대로 · 1 전체(삭발) · 2 모히칸 옆머리 · 3 투블럭 옆머리 (살짝)
+      shave: { 6: 1, 3: 2, 2: 3 }[cfg.hair | 0] || 0,
     };
     // 옷 종류마다 재질 하나씩 (셔츠·반바지·양말·축구화·몸·머리카락)
     const mats = {};
@@ -621,11 +834,30 @@ diffuseColor.rgb = col;`)
       };
     });
 
+    // 헤어스타일: 숏컷(0)이 아니면 원래 머리카락을 스타일 모양으로 바꾸고, 필요하면(아프로·묶은 뭉치) 머리 껍질을 같은 뼈대에 붙임
+    const style = cfg.hair | 0;
+    if (style > 0 && hairC) {
+      const bodyM = hairGeos[style] && meshes.find((o) => meshKind[o.name] === KIND.body);
+      // 원래 머리카락: 스타일에 맞게 눌러/세운 모양으로 바꾸거나(버즈컷·투블럭·모히칸·묶음머리), 숨김(아프로·삭발)
+      meshes.forEach((o) => {
+        if (meshKind[o.name] !== KIND.hair) return;
+        if (hairCardGeos[style]) { o.geometry = o.userData.baseGeo = hairCardGeos[style]; } else o.visible = false;
+      });
+      if (bodyM) {
+        const hm = new THREE.SkinnedMesh(hairGeos[style], hairShellMaterial(kit, style));
+        hm.name = 'pk-hair-shell'; hm.frustumCulled = false; hm.userData.sharedGeo = true;
+        hm.castShadow = style === 4 || style === 5;
+        hm.position.copy(bodyM.position); hm.quaternion.copy(bodyM.quaternion); hm.scale.copy(bodyM.scale);
+        bodyM.parent.add(hm);
+        hm.bind(bodyM.skeleton, bodyM.bindMatrix);
+      }
+    }
+
     // 함성 표정: 얼굴 전체를 환호하는 모양으로 바꾸고(턱·입꼬리·윗입술·볼·코·눈·눈썹), 입속에 입체 이·혀를 넣음
     const mouth = buildMouthInside();
     model.add(mouth);
     const setMouthOpen = (amt) => {
-      meshes.forEach((o) => { o.geometry = amt > 0 ? shoutGeometry(o.name, amt) : kitGeos[o.name]; });
+      meshes.forEach((o) => { o.geometry = o.userData.baseGeo || (amt > 0 ? shoutGeometry(o.name, amt) : kitGeos[o.name]); });
       mouth.visible = amt > 0;
       mouth.userData.jaw.rotation.x = SHOUT.jaw / JAW_R * amt; // 아랫니·혀는 아래턱과 같이 돌아감
       if (mats[KIND.body] && mats[KIND.body].userData.U) mats[KIND.body].userData.U.uShout.value = amt;

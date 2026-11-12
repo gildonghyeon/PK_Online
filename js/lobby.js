@@ -32,7 +32,8 @@ PK.Stats = (function () {
 PK.Lobby = (function () {
   const O = PK.Options;
   const ROWS = [
-    // 헤어스타일·표정은 사실적인 선수 모델에서는 바꿀 수 없어 목록에서 뺌 (저장 값은 그대로 둠)
+    // 표정은 사실적인 선수 모델에서는 바꿀 수 없어 목록에서 뺌 (저장 값은 그대로 둠)
+    { key: 'hair', label: '헤어스타일', name: (i) => O.hair[i], count: () => O.hair.length },
     { key: 'hairColor', label: '머리 색', name: (i) => O.hairColor[i].name, sw: (i) => O.hairColor[i].c, count: () => O.hairColor.length },
     { key: 'skin', label: '피부색', name: (i) => O.skin[i].name, sw: (i) => O.skin[i].c, count: () => O.skin.length },
     { key: 'uniform', label: '유니폼', name: (i) => O.uniform[i].name, sw: (i) => O.uniform[i].c1, count: () => O.uniform.length },
