@@ -426,3 +426,31 @@ html, body, button { touch-action: manipulation; -webkit-text-size-adjust: 100%;
 .ap-fill { stroke: #6ee36e; stroke-width: 7 !important; stroke-linecap: round; filter: drop-shadow(0 0 3px rgba(0,0,0,.7)); }
 .ap-track { stroke-width: 9 !important; }
 #kick-panel .meter { display: none !important; }
+
+/* ---------------- 가로로 눕힌 휴대폰 (높이가 낮은 화면): 골대를 가리지 않게 ---------------- */
+/*  가운데 위는 크로스바·위 구석 자리라 점수판·역할 표시를 왼쪽 위 구석으로, 킥 종류는 아래 가운데로, 조작 버튼은 작게 구석으로 */
+@media (max-height: 500px) and (orientation: landscape) {
+  .scoreboard { position: absolute; top: calc(6px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px));
+    margin: 0; gap: 8px; padding: 4px 10px; border-radius: 10px; }
+  .team { min-width: 0; }
+  .team-name { font-size: 11px; gap: 4px; max-width: 92px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .team-name .chip { width: 9px; height: 9px; flex: none; }
+  .dots { gap: 3px; margin-top: 3px; }
+  .dot { width: 10px; height: 10px; border-width: 1.5px; font-size: 0; line-height: 0; }
+  .score { font-size: 24px; gap: 4px; }
+  .round-label { position: absolute; top: calc(54px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); margin: 0; font-size: 11px; }
+  .role-banner { position: absolute; top: calc(72px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); margin: 0; padding: 3px 10px; font-size: 12px; }
+  .instruction { position: absolute; top: calc(100px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); margin: 0;
+    max-width: 34vw; font-size: 11px; padding: 3px 8px; }
+  .result-text { top: 52%; font-size: clamp(44px, 9vw, 90px); }
+  .hud-btn { top: calc(8px + env(safe-area-inset-top, 0px)); right: calc(8px + env(safe-area-inset-right, 0px)); width: 34px; height: 34px; font-size: 15px; }
+  .kick-timer { top: calc(6px + env(safe-area-inset-top, 0px)); right: calc(52px + env(safe-area-inset-right, 0px));
+    min-width: 40px; height: 40px; line-height: 34px; font-size: 20px; border-width: 3px; padding: 0 6px; }
+  .shot-mini, body.touch .shot-mini { top: calc(54px + env(safe-area-inset-top, 0px)); left: auto; right: calc(8px + env(safe-area-inset-right, 0px));
+    transform: none; width: 110px; }
+  body.touch #kick-panel .choice { left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: 210px; padding: 4px; }
+  body.touch .joy { width: 112px; height: 112px; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  body.touch .joy-knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+  body.touch .btn-action, body.touch .btn-stutter-touch { width: 90px; height: 90px; font-size: 16px;
+    right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+}
