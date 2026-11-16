@@ -543,6 +543,7 @@ PK.Game = (function () {
     keeper.rotation.set(0, 0, 0);
     keeper.scale.set(1, 1, 1); // 반대쪽 다이빙 동작에서 뒤집었던 것 되돌림 (기울인 것도)
     keeper.userData.postAnim = null;
+    if (keeper.userData.setShout) keeper.userData.setShout(false); // 지난 라운드 환호(주먹·함성) 풀기
     // 새 라운드는 곧바로 대기 자세로 (지난 라운드의 누운 자세에서 서서히 바뀌며 이상하게 일어나지 않게)
     if (keeper.userData.anim) keeper.userData.anim('GkIdle', { fade: 0 });
     if (kicker.userData.anim) kicker.userData.anim(null, { fade: 0 });
@@ -1141,14 +1142,20 @@ PK.Game = (function () {
     keeperPose();
     const ku = K.av.userData;
     if (ku.anim) {
-      const cel = K.celebrate && st.time >= K.celebrate.t0 + 0.3;
+      // 옆으로 날았으면 다 일어선 뒤에 환호 (누운 채 환호 동작으로 섞이면 몸이 비스듬히 뜨고 손이 꼬여 보였음)
+      const risen = !(K.clipDive && st.time >= K.diveStart) || (K.clipCt || 0) >= K.clipDive.dur - 0.12;
+      const cel = K.celebrate && st.time >= K.celebrate.t0 + 0.3 && risen;
       const ready = !K.dive || st.time < K.diveStart; // 다이빙 전: 실제 골키퍼 준비 자세 (옆으로 이동 중엔 기존 스텝 동작)
       // 버티기·제자리 점프 후 공 판정이 끝나면 다시 편한 대기 자세로 (손을 뻗은 채 굳어 있지 않게)
       const settled = K.dive && K.dive.mode === 'center' && st.flight && st.flight.resolved && st.time - K.diveStart > K.dive.T + 0.5;
-      // 실점: 옆으로 날았으면 다이빙 동작을 그대로(착지 → 일어남) 두고, 아니면 편하게 선 자세로 바꾼 뒤 머리를 감싸 쥠
+      // 실점: 옆으로 날았으면 다이빙 동작 그대로(착지 → 누움 → 일어남), 다 일어선 뒤에야 선 자세로 바꿔 머리를 감싸 쥠
+      //  (예전엔 땅에 떨어지자마자 손이 머리로 가서, 그 자세 그대로 일어났음)
       const dj = K.dejected && st.time >= K.dejected.t0 && !cel ? K.dejected : null;
+      const upright = dj && (!(K.clipDive && !ready) || (K.clipCt || 0) >= K.clipDive.dur - 0.12);
+      // 환호: 주먹을 꽉 쥐고 함성 (편 손으로 주먹 쥐는 동작을 하면 어색함)
+      if (cel && !K.celShout && ku.setShout) { K.celShout = true; ku.setShout(true); }
       if (cel) ku.anim('Yes', { fade: 0.7 });
-      else if (dj && !(K.clipDive && !ready)) ku.anim('Idle_Loop', { fade: 0.6 });
+      else if (upright) ku.anim('Idle_Loop', { fade: 0.35 });
       else if ((ready && !K.stepping) || settled) ku.anim('GkIdle', { fade: settled ? 0.5 : 0.3 });
       else if (K.clipDive && !ready) ku.anim(K.clipDive.name, { fade: 0.12, phase: clipDiveUpdate(K) });
       else if (K.blockClip && !ready) { const ph = blockUpdate(K); ku.anim(K.blockLow ? 'GkCatch' : 'GkIdle', K.blockLow ? { fade: 0.12, phase: ph } : { fade: 0.12 }); }
@@ -1156,12 +1163,13 @@ PK.Game = (function () {
       if (cel || settled || !K.clipDive || ready) ku.postAnim = null; // 두 손 모으기는 다이빙 중에만
       if (K.blockClip && !ready && !settled && !cel && !dj) { const bw = K.blockW || 0; ku.postAnim = (B) => blockHands(B, bw, K); }
       if (dj) {
-        // 다이빙했으면 땅에 떨어진 뒤부터 (날아가는 중에 손이 머리로 가지 않게)
-        const landed = !K.clipDive || ready || (K.clipCt || 0) >= K.clipDive.tl + 0.35;
-        if (landed && dj.w0 === undefined) dj.w0 = st.time;
-        const w = dj.w0 === undefined ? 0 : easeInOut(clamp((st.time - dj.w0) / 0.7, 0, 1));
-        const prev = ku.postAnim, tt = st.time;
-        if (w > 0) ku.postAnim = (B) => { if (prev) prev(B); handsOnHead(B, w, tt); };
+        // 다 일어선 뒤 잠깐(선 자세로 바뀌는 동안) 있다가 머리를 감싸 쥠
+        if (upright && dj.up === undefined) dj.up = st.time;
+        if (dj.up !== undefined && dj.w0 === undefined && st.time >= dj.up + 0.3) dj.w0 = st.time;
+        const w = dj.w0 === undefined ? 0 : easeInOut(clamp((st.time - dj.w0) / 0.6, 0, 1));
+        // (예전엔 지난 프레임의 덧붙임 함수를 감싸 이어 붙여서, 다이빙 뒤에는 프레임마다 IK 가 겹겹이 돌며 팔이 파닥거렸음)
+        const tt = st.time;
+        ku.postAnim = w > 0 ? (B) => handsOnHead(B, w, tt, dj) : (upright ? null : ku.postAnim);
       }
     }
     if (!(K.celebrate && st.time >= K.celebrate.t0)) {
@@ -1202,7 +1210,12 @@ PK.Game = (function () {
     const after = tau - T, hang = after < 0.3 ? after * 0.35 : 0.105 + (after - 0.3);
     // 처음에 빠르게 뻗고 끝에서 느려지게
     const u = clamp(tau / T, 0, 1), ue = 1 - Math.pow(1 - u, PK.Tune.clipDiveEase);
-    const ct = tau < T ? cd.t0 + (cd.ts - cd.t0) * ue : Math.min(cd.dur - 0.01, cd.ts + hang);
+    // 실점한 뒤에는 누워 있다 일어나는 부분을 조금 빠르게 (다 일어선 다음 절망하는 모습까지 보이게)
+    const cdt = K.lastClipT === undefined ? 0 : Math.max(0, st.time - K.lastClipT);
+    K.lastClipT = st.time;
+    const resolved = (K.dejected && st.time >= K.dejected.t0) || (K.celebrate && st.time >= K.celebrate.t0);
+    if (resolved && (K.clipCt || 0) > cd.tl) K.clipBoost = (K.clipBoost || 0) + cdt * 0.4;
+    const ct = tau < T ? cd.t0 + (cd.ts - cd.t0) * ue : Math.min(cd.dur - 0.01, cd.ts + hang + (K.clipBoost || 0));
     // 목표: 공을 보고 보정한 점(re) → 기존과 같은 최대 다이빙 거리 안으로
     let tx = K.re ? K.re.x : d.D.x, ty = K.re ? K.re.y : d.D.y;
     const dx = tx, dy = ty - 0.91, dist = Math.hypot(dx, dy) || 1;
@@ -1322,8 +1335,15 @@ PK.Game = (function () {
       }
     });
   }
-  function handsOnHead(B, w, t) {
+  const ARM_BONES = ['upperarm_l', 'lowerarm_l', 'hand_l', 'upperarm_r', 'lowerarm_r', 'hand_r'];
+  function handsOnHead(B, w, t, store) {
     if (!B.Head || !B.head_end || !B.upperarm_l || !B.neck_01) return;
+    // 팔은 매 프레임 같은 출발 자세에서 풀어야 함: 서 있는 동작이 팔을 계속 흔들어 IK 결과(팔꿈치·손목 비틀림)가
+    //  프레임마다 달라져 머리 위에서 파닥거렸음 → 처음 잡은 팔 자세를 기억해 두고 매번 그 자세에서 시작
+    if (store) {
+      if (!store.armQ) store.armQ = ARM_BONES.map((n) => B[n].quaternion.clone());
+      else { ARM_BONES.forEach((n, i) => B[n].quaternion.copy(store.armQ[i])); B.upperarm_l.updateMatrixWorld(true); B.upperarm_r.updateMatrixWorld(true); }
+    }
     const [head, top, side, up, fwd, tmp] = _dj.v;
     // 고개 떨구기 (먼저: 손 목표가 숙인 머리를 따라가게)
     B.Head.getWorldPosition(head); B.head_end.getWorldPosition(top);
@@ -1332,7 +1352,7 @@ PK.Game = (function () {
     fwd.crossVectors(side, up).normalize();
     const rootF = tmp.set(0, 0, 1).applyQuaternion(st.K.av.getWorldQuaternion(_dj.q2));
     if (fwd.dot(rootF) < 0) fwd.negate();
-    const bow = (0.38 + 0.05 * Math.sin(t * 2.2)) * w; // 천천히 고개를 저으며 숙임
+    const bow = 0.38 * w; // 고개를 떨굼
     const neckQ = new THREE.Quaternion().setFromAxisAngle(new V3().crossVectors(up, fwd).normalize(), bow);
     const nb = B.neck_01, npw = nb.parent.getWorldQuaternion(new THREE.Quaternion());
     nb.quaternion.copy(npw.clone().invert().multiply(neckQ.multiply(nb.getWorldQuaternion(new THREE.Quaternion()))));
@@ -1345,8 +1365,8 @@ PK.Game = (function () {
       const ua = B['upperarm_' + s], la = B['lowerarm_' + s], hd = B['hand_' + s];
       const S = ua.getWorldPosition(new V3()), E = la.getWorldPosition(new V3()), H = hd.getWorldPosition(new V3());
       const L1 = S.distanceTo(E), L2 = E.distanceTo(H);
-      // 손 목표: 정수리 조금 아래 옆 (손바닥이 머리 옆·뒤를 감쌈)
-      const goal = top.clone().lerp(head, 0.32).addScaledVector(side, sg * 0.075).addScaledVector(fwd, -0.015);
+      // 손목 목표: 이마 위 옆쪽 (손가락이 정수리 너머 뒤로 덮도록 아래에서 손 방향을 돌림)
+      const goal = top.clone().lerp(head, 0.22).addScaledVector(side, sg * 0.07).addScaledVector(fwd, 0.035);
       const T = H.clone().lerp(goal, w);
       const dv = T.clone().sub(S); let d = dv.length(); dv.normalize();
       d = clamp(d, Math.abs(L1 - L2) + 0.01, L1 + L2 - 0.005);
@@ -1357,6 +1377,13 @@ PK.Game = (function () {
       rotateBoneWorld(ua, E.clone().sub(S), E2.clone().sub(S));
       const E3 = la.getWorldPosition(new V3()), H3 = hd.getWorldPosition(new V3());
       rotateBoneWorld(la, H3.clone().sub(E3), T.clone().sub(E3));
+      // 손: 손가락이 하늘로 솟지 않고 정수리를 덮어 뒤통수 쪽으로 (머리를 감싸 쥔 모양)
+      if (B['middle_01_' + s]) {
+        const h4 = hd.getWorldPosition(new V3()), m4 = B['middle_01_' + s].getWorldPosition(new V3());
+        const cur = m4.sub(h4).normalize();
+        const want = fwd.clone().multiplyScalar(-0.75).addScaledVector(up, -0.3).addScaledVector(side, -sg * 0.3).normalize();
+        rotateBoneWorld(hd, cur, cur.clone().lerp(want, w));
+      }
     });
   }
 
@@ -1893,7 +1920,7 @@ PK.Game = (function () {
     const b = st.ball.p;
     setCam(new V3(goal ? 4.5 : -4.5, 2.0, 6.5), new V3(b.x * 0.5, 1.0, Math.min(b.z, 2)), 1.2);
     st.state = 'result';
-    later(goal ? 3.3 : 2.8, () => { S.crowd.excite = 0; nextKick(); }); // 골이면 키퍼가 아쉬워하는 모습까지 조금 더 보여 줌
+    later(goal ? 3.7 : cls === 'save' ? 3.4 : 2.8, () => { S.crowd.excite = 0; nextKick(); }); // 골이면 키퍼가 아쉬워하는 모습까지 조금 더 보여 줌
   }
 
   // ---------- 슛 지도 (경기 후, 키커 시점에서 본 골대 위에 찬 위치와 결과) ----------

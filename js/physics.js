@@ -169,11 +169,14 @@ PK.Physics = (function () {
           rel.copy(vT).addScaledVector(nrm, -vn * e);
           if (e < 0) env.ignoreUntil = s.t + 0.06; // 손을 밀어내고 통과
           else if (c.part === 'hand' || c.part === 'arm') {
-            // 손·팔로 쳐낸 공은 골문 바깥쪽(가까운 골대 쪽)으로: 골문 안으로 계속 가던 속도를 줄이고 옆으로 밀어냄
+            // 손·팔로 쳐낸 공은 골문 바깥쪽(가까운 골대 쪽)으로: 골문 안으로 계속 가던 속도를 거의 죽이고 옆으로 밀어냄
+            //  (예전엔 스치듯 맞으면 골문 쪽 속도가 꽤 남아 '손 맞고 골'이 잦았음)
             const out = Math.sign(s.p.x) || 1;
-            if (rel.z < 0) rel.z *= 0.45;
-            rel.x += out * Math.min(6, speed * 0.22);
-          }
+            if (rel.z < 0) rel.z *= c.part === 'hand' ? 0.15 : 0.25;
+            rel.x += out * Math.min(8, speed * 0.3);
+            // 높은 공은 손끝으로 크로스바 위로 걷어 냄
+            if (s.p.y > 1.55) rel.y = Math.max(rel.y, 0) + Math.min(5, speed * 0.16);
+          } else if (rel.z < 0) rel.z *= 0.4; // 몸·다리에 스친 공도 골문 쪽 속도를 크게 줄임
           s.v.copy(rel).add(kv);
           s.spin.multiplyScalar(0.3);
           env.touched = true;
