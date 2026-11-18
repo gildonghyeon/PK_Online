@@ -172,7 +172,8 @@ PK.Physics = (function () {
             // 손·팔로 쳐낸 공은 골문 바깥쪽(가까운 골대 쪽)으로: 골문 안으로 계속 가던 속도를 거의 죽이고 옆으로 밀어냄
             //  (예전엔 스치듯 맞으면 골문 쪽 속도가 꽤 남아 '손 맞고 골'이 잦았음)
             const out = Math.sign(s.p.x) || 1;
-            if (rel.z < 0) rel.z *= c.part === 'hand' ? 0.15 : 0.25;
+            // 골문 쪽으로 가던 공은 앞(필드 쪽)으로 튕겨 냄: 느려진 채 계속 굴러 골라인을 넘던 일이 없게
+            if (rel.z < 0) rel.z = -rel.z * (c.part === 'hand' ? 0.25 : 0.15);
             rel.x += out * Math.min(8, speed * 0.3);
             // 높은 공은 손끝으로 크로스바 위로 걷어 냄
             if (s.p.y > 1.55) rel.y = Math.max(rel.y, 0) + Math.min(5, speed * 0.16);
