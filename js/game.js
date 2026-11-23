@@ -7,7 +7,7 @@ PK.Tune = { maxT: 2.05, diveBase: 0.34, diveTime: 0.05, diveVmax: 7.5, diveIK: 1
   readX: 2.0, readY: 0.95, readRate: 10.0, // 날아가며 공 쪽으로 손을 맞추는 범위(m)·속도(m/s): 방향을 읽으면 대체로 닿게
   readYChosen: 0.3, // 사람 키퍼가 위·아래를 직접 골랐을 때 높이 보정 범위(m)
   aiReadX: 0.25, aiReadY: 0.2, aiDiveIK: 0, aiGloveR: 0.1, aiDiveVmax: 6.2, // AI 키퍼: 보정 범위·손 뻗기를 줄여 선방률을 예전 수준으로
-  dirWait: 0.15 }; // 사람 키퍼가 방향 없이 스페이스를 먼저 눌렀을 때 방향 입력을 기다리는 시간(초)
+  dirWait: 0.15, ikBack: 0.15, ikFade: 0.35 }; // 사람 키퍼가 방향 없이 스페이스를 먼저 눌렀을 때 방향 입력을 기다리는 시간(초)
 
 PK.Game = (function () {
   const V3 = THREE.Vector3;
@@ -176,6 +176,7 @@ PK.Game = (function () {
     // 조작은 키보드(방향키·스페이스)와 터치 화면 버튼만: 마우스 조준·클릭은 쓰지 않음
     window.addEventListener('keydown', (e) => {
       if (!st.active) return;
+      if (st.state === 'replay' && (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape')) { e.preventDefault(); if (!e.repeat) endReplay(); return; } // 리플레이 건너뛰기
       st.keys[e.code] = true;
       if (e.code === 'Space') {
         e.preventDefault();
@@ -555,7 +556,12 @@ PK.Game = (function () {
   // ---------- 킥 준비 ----------
   function nextKick() {
     const winner = checkEnd();
-    if (winner >= 0) return endMatch(winner);
+    if (winner >= 0) {
+      // 승부를 가른 킥: 결과 화면 전에 슬로모션 리플레이
+      const R = st.rec;
+      if (R && !R.played && R.kickT !== undefined && R.resT !== undefined && R.frames.length > 20) { R.played = true; return startReplay(() => endMatch(winner)); }
+      return endMatch(winner);
+    }
 
     st.kickerTeam = nextKickerTeam();
     st.keeperTeam = 1 - st.kickerTeam;
@@ -992,6 +998,7 @@ PK.Game = (function () {
   // ---------- 런업 & 킥 ----------
   function beginRunup() {
     st.state = 'runup';
+    startRecording();
     setText('role-banner', ''); setText('instruction', '');
     S.aim.visible = false; S.traj.visible = false;
     const clipKick = useKickClip(st.Kk.av) ? kickDefFor(st.shot && st.shot.type) : null;
@@ -1036,6 +1043,7 @@ PK.Game = (function () {
   }
 
   function launchBall() {
+    if (st.rec) st.rec.kickT = st.time;
     let shot = st.shot;
     const K = st.K;
     if (K && K.remote) {
@@ -1333,10 +1341,24 @@ PK.Game = (function () {
     const hl = B.hand_l.getWorldPosition(new V3()), hr = B.hand_r.getWorldPosition(new V3());
     const mid = hl.clone().add(hr).multiplyScalar(0.5);
     T.z = mid.z;
+    // 팔은 기본적으로 다이빙하는 쪽으로 뻗음 (동작 그대로).
+    //  공이 날아가는 쪽에 있거나 몸 가까이(골반 뒤 ikBack 안쪽)로 오면 손을 공 쪽으로 맞추고,
+    //  그보다 반대쪽(등 뒤)으로 차면 팔은 전혀 반응하지 않음: 반대로 뛰었는데 팔만 공 쪽으로 돌아오며 몸이 꼬이지 않게
+    let w = ik.w;
+    const pel = B.pelvis ? B.pelvis.getWorldPosition(new V3()) : null;
+    if (pel) {
+      const dir = Math.sign(mid.x - pel.x) || 1;
+      const behind = -(T.x - pel.x) * dir; // 골반보다 등 뒤쪽으로 얼마나 (m)
+      if (behind > PK.Tune.ikBack) {
+        w *= clamp(1 - (behind - PK.Tune.ikBack) / PK.Tune.ikFade, 0, 1); // 멀어질수록 반응을 줄여 곧 0
+        T.x = pel.x - dir * PK.Tune.ikBack;
+      }
+      if (w < 0.01) return;
+    }
     // 두 손은 공 높이에서 나란히 (가로 18cm): 위아래로 겹치면 위쪽 손이 공에서 멀어짐
     const half = new V3(Math.sign(hr.x - hl.x) * 0.09 || 0.09, 0, 0);
     [['l', hl, -1], ['r', hr, 1]].forEach(([s, H, sg]) => {
-      const goal = H.clone().lerp(T.clone().addScaledVector(half, sg), ik.w);
+      const goal = H.clone().lerp(T.clone().addScaledVector(half, sg), w);
       const E = B['lowerarm_' + s].getWorldPosition(new V3()), S = B['upperarm_' + s].getWorldPosition(new V3());
       const pole = E.clone().sub(S.clone().add(H).multiplyScalar(0.5)); // 지금 팔꿈치가 굽은 쪽 그대로
       armIK(B, s, goal, pole);
@@ -1928,6 +1950,8 @@ PK.Game = (function () {
   function flightUpdate(dt) {
     const F = st.flight; if (!F) return;
     const b = st.ball;
+    // 잡은 공: 키퍼가 일어나 환호하기 시작하면 앞에 내려놓음 (두 손을 벌리고 주먹을 들 때 공이 손 사이 허공에 떠 있지 않게)
+    if (b.held && st.K && st.K.celebrate && st.time >= st.K.celebrate.t0) { b.held = false; b.v.set(0, 0.6, 1.4); b.spin.set(0, 0, 0); }
     F.env.keeper = keeperCapsules(dt);
     if (F.outcome === 'goal') F.env.keeper = []; // 이미 골: 늦게 몸을 날린 키퍼가 그물 속 공을 건드리지 않게
     const sub = Math.ceil(dt / (1 / 600));
@@ -1980,7 +2004,7 @@ PK.Game = (function () {
       case 'post': F.events.post = true; PK.Audio.post(); break;
       case 'keeper': F.events.keeper = true; PK.Audio.glove(); break;
       case 'catch': F.events.catch = true; F.events.keeper = true; PK.Audio.glove(); break;
-      case 'net': S.net.hit(ev.point, Math.min(6, ev.speed * 0.35)); PK.Audio.net(); st.netHits = (st.netHits || 0) + 1; break;
+      case 'net': if (st.rec && !st.rec.done) st.rec.net.push({ t: st.time, p: ev.point.clone(), s: Math.min(6, ev.speed * 0.35) }); S.net.hit(ev.point, Math.min(6, ev.speed * 0.35)); PK.Audio.net(); st.netHits = (st.netHits || 0) + 1; break;
       case 'bounce': if (ev.speed > 2) PK.Audio.bounce(); break;
     }
   }
@@ -2018,6 +2042,7 @@ PK.Game = (function () {
     S.crowd.cheer = goal ? st.kickerTeam : st.keeperTeam;
     if (goal) { PK.Audio.cheer(); S.crowd.excite = 1; } else { PK.Audio.groan(); S.crowd.excite = cls === 'save' ? 0.85 : 0.6; }
     st.Kk.react = { t0: st.time, good: goal };
+    if (st.rec) st.rec.resT = st.time;
     if (cls === 'save') st.K.celebrate = { t0: st.time + 0.6 }; // 잠시 후 일어나서 환호
     else if (goal) st.K.dejected = { t0: st.time + 0.25 };       // 실점: 머리를 감싸 쥐고 아쉬워함
     // 리플레이 느낌의 카메라
@@ -2123,6 +2148,10 @@ PK.Game = (function () {
   // ---------- 경기 종료 ----------
   function endMatch(w) {
     st.state = 'end';
+    // 마지막 세리머니 동안 공은 더 움직이지 않으므로, 손에 들려 있거나 공중에 멈춰 있으면 잔디 위로 내려놓음
+    if (st.ball && (st.ball.held || st.ball.p.y > BR + 0.02) && !st.ball.inGoal) {
+      st.ball.held = false; st.ball.p.y = BR; S.ball.position.copy(st.ball.p);
+    }
     hideKickUI();
     setText('role-banner', ''); setText('instruction', '');
     const humanWin = online() ? isLocal(w) : st.teams[w].human;
@@ -2293,6 +2322,7 @@ PK.Game = (function () {
       if (st.time - a.t0 >= a.dur) { st.state = 'coinDone'; coinDone(); }
     }
     if (online()) onlineTick();
+    if (st.state === 'replay') { replayUpdate(dt); envUpdate(dt); return; }
     if (st.state === 'kickerAim') updateAim(dt);
     else if (!$('aim-power').hidden) $('aim-power').hidden = true; // 조준이 끝나면 파워 링 숨김
     updateKickTimer();
@@ -2306,6 +2336,11 @@ PK.Game = (function () {
     if (st.avatars) st.avatars.forEach((a) => { [a.kicker, a.keeper].forEach((m) => { if (m.visible && m.userData.sync) m.userData.sync(); }); });
     if (st.state === 'flight' || (st.flight && st.state === 'result')) flightUpdate(dt);
 
+    envUpdate(dt);
+    recordFrame();
+  }
+  // 그물·관중·날씨·광고·카메라 (리플레이 중에도 계속)
+  function envUpdate(dt) {
     S.net.update(dt);
     S.crowd._dt = dt; S.crowd.update(st.time);
     if (S.updateWeather) S.updateWeather(dt); // 비·눈
@@ -2318,6 +2353,113 @@ PK.Game = (function () {
     c.pos.lerp(c.tPos, k); c.look.lerp(c.tLook, k);
     camera.position.copy(c.pos);
     camera.lookAt(c.look);
+  }
+
+  // ---------- 승부를 가른 킥 리플레이 ----------
+  //  킥마다 도움닫기부터 결과 직후까지 공·키커·키퍼의 자세(뼈 회전)를 매 프레임 기록해 두고,
+  //  그 킥으로 승부가 나면 골대 옆 다른 각도에서 슬로모션으로 다시 보여 줌
+  const REC_AFTER = 1.1;   // 결과가 난 뒤 더 담는 시간
+  const RP_SPEED = 0.45;   // 재생 빠르기 (슬로모션)
+  function startRecording() {
+    st.rec = null;
+    if (st.practice || !st.Kk || !st.K) return; // 연습은 승부가 없음
+    const avs = [st.Kk.av, st.K.av].map((av) => { const bones = []; av.traverse((o) => { if (o.isBone) bones.push(o); }); return { av, bones }; });
+    st.rec = { avs, frames: [], net: [], t0: st.time, done: false };
+  }
+  function recordFrame() {
+    const R = st.rec;
+    if (!R || R.done) return;
+    if (R.resT !== undefined && st.time > R.resT + REC_AFTER) { R.done = true; return; }
+    if (R.frames.length > 1500) { R.done = true; return; } // 아주 긴 멈칫 등: 너무 많이 쌓이지 않게
+    const b = S.ball;
+    const f = { t: st.time, ball: [b.position.x, b.position.y, b.position.z, b.quaternion.x, b.quaternion.y, b.quaternion.z, b.quaternion.w], av: [] };
+    R.avs.forEach(({ av, bones }) => {
+      const a = new Float32Array(11 + bones.length * 7);
+      a.set([av.visible ? 1 : 0, av.position.x, av.position.y, av.position.z, av.quaternion.x, av.quaternion.y, av.quaternion.z, av.quaternion.w, av.scale.x, av.scale.y, av.scale.z]);
+      bones.forEach((bn, i) => { const o = 11 + i * 7; a[o] = bn.position.x; a[o + 1] = bn.position.y; a[o + 2] = bn.position.z; a[o + 3] = bn.quaternion.x; a[o + 4] = bn.quaternion.y; a[o + 5] = bn.quaternion.z; a[o + 6] = bn.quaternion.w; });
+      f.av.push(a);
+    });
+    R.frames.push(f);
+  }
+  const rq0 = new THREE.Quaternion(), rq1 = new THREE.Quaternion();
+  function applyFrame(f0, f1, u) {
+    const R = st.rec;
+    const L = (i, a, b) => a[i] + (b[i] - a[i]) * u;
+    S.ball.position.set(L(0, f0.ball, f1.ball), L(1, f0.ball, f1.ball), L(2, f0.ball, f1.ball));
+    rq0.fromArray(f0.ball, 3); rq1.fromArray(f1.ball, 3); S.ball.quaternion.copy(rq0.slerp(rq1, u));
+    R.avs.forEach(({ av, bones }, k) => {
+      const a = f0.av[k], b = f1.av[k];
+      av.visible = a[0] > 0.5;
+      av.position.set(L(1, a, b), L(2, a, b), L(3, a, b));
+      rq0.fromArray(a, 4); rq1.fromArray(b, 4); av.quaternion.copy(rq0.slerp(rq1, u));
+      av.scale.set(b[8], L(9, a, b), L(10, a, b)); // 가로 배율(좌우 뒤집기)은 섞지 않음
+      bones.forEach((bn, i) => {
+        const o = 11 + i * 7;
+        bn.position.set(L(o, a, b), L(o + 1, a, b), L(o + 2, a, b));
+        rq0.fromArray(a, o + 3); rq1.fromArray(b, o + 3); bn.quaternion.copy(rq0.slerp(rq1, u));
+      });
+      av.updateMatrixWorld(true);
+    });
+  }
+  function startReplay(done) {
+    const R = st.rec;
+    // 공을 차기 0.9초 전부터 결과 뒤까지
+    R.from = Math.max(R.frames[0].t, R.kickT - 0.9);
+    R.to = R.frames[R.frames.length - 1].t;
+    R.t = R.from; R.fi = 0; R.netI = 0; R.done2 = done;
+    // 처음 자리 기억 (리플레이 뒤 되돌림)
+    R.saved = R.avs.map(({ av }) => ({ p: av.position.clone(), q: av.quaternion.clone(), s: av.scale.clone(), v: av.visible }));
+    R.savedBall = S.ball.position.clone();
+    while (R.netI < R.net.length && R.net[R.netI].t < R.from) R.netI++;
+    // 카메라: 키커 뒤 대각선(공이 간 쪽)에서 키커·공·골대·키퍼를 한 화면에 담고, 공이 날아가면 골대 쪽으로 다가감
+    const last = st.shotLog && st.shotLog.length ? st.shotLog[st.shotLog.length - 1] : null;
+    const side = (last ? Math.sign(last.x) : 0) || 1;
+    R.side = side;
+    st.cam.pos.set(side * 9, 3.0, 17); st.cam.tPos.copy(st.cam.pos);
+    st.cam.look.set(0, 1.0, 5); st.cam.tLook.copy(st.cam.look); st.cam.speed = 2.2;
+    $('result-text').className = 'result-text';
+    hideKickUI();
+    setText('role-banner', ''); setText('instruction', '');
+    showReplayBadge(true);
+    st.state = 'replay';
+  }
+  function replayUpdate(dt) {
+    const R = st.rec;
+    // 공을 차는 순간과 결과가 나는 순간 앞뒤로 더 느리게
+    const near = Math.abs(R.t - R.kickT) < 0.25 || Math.abs(R.t - R.resT) < 0.35;
+    R.t += dt * (near ? RP_SPEED * 0.75 : RP_SPEED);
+    if (R.t >= R.to) { endReplay(); return; }
+    while (R.fi < R.frames.length - 2 && R.frames[R.fi + 1].t <= R.t) R.fi++;
+    const f0 = R.frames[R.fi], f1 = R.frames[R.fi + 1] || f0;
+    const u = f1.t > f0.t ? clamp((R.t - f0.t) / (f1.t - f0.t), 0, 1) : 0;
+    applyFrame(f0, f1, u);
+    while (R.netI < R.net.length && R.net[R.netI].t <= R.t) { const n = R.net[R.netI++]; S.net.hit(n.p, n.s); }
+    // 공을 찬 뒤: 골대 쪽으로 다가가며 공과 키퍼를 따라봄
+    const b = S.ball.position, go = clamp((R.t - R.kickT) / 0.5, 0, 1);
+    st.cam.tPos.set(R.side * lerp(9, 5.5, go), lerp(3.0, 1.7, go), lerp(17, 6.5, go));
+    st.cam.tLook.set(lerp(0, b.x * 0.5, go), lerp(1.0, clamp(b.y, 0.7, 1.8), go), lerp(5, clamp(b.z, 0, 3), go));
+  }
+  function endReplay() {
+    const R = st.rec;
+    if (!R || st.state !== 'replay') return;
+    showReplayBadge(false);
+    R.avs.forEach(({ av }, k) => { const sv = R.saved[k]; av.position.copy(sv.p); av.quaternion.copy(sv.q); av.scale.copy(sv.s); av.visible = sv.v; });
+    S.ball.position.copy(R.savedBall);
+    st.state = 'busy';
+    const done = R.done2; R.done2 = null;
+    if (done) done();
+  }
+  function showReplayBadge(on) {
+    let el = $('replay-badge');
+    if (!el && on) {
+      el = document.createElement('div'); el.id = 'replay-badge'; el.className = 'replay-badge';
+      // 중계 화면처럼 위·아래 검은 띠 + 큰 '리플레이' 글자
+      el.innerHTML = '<div class="rp-bar top"><span class="rp-tag"><span class="rp-dot" aria-hidden="true"></span>REPLAY</span><b>리플레이</b><span class="rp-sub">승부를 가른 킥 · 슬로모션</span></div>' +
+        '<div class="rp-bar bottom"><button type="button" id="replay-skip">건너뛰기 ▶</button></div>';
+      $('hud').appendChild(el);
+      $('replay-skip').addEventListener('click', (e) => { e.stopPropagation(); endReplay(); });
+    }
+    if (el) { el.hidden = !on; el.classList.toggle('show', !!on); }
   }
 
   // 온라인 상대가 나갔을 때
