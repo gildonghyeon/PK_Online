@@ -244,6 +244,12 @@ PK.Lobby = (function () {
     const wide = window.matchMedia('(min-width: 1280px) and (min-height: 600px)').matches;
     if (wide && help.parentNode !== slot) slot.appendChild(help);
     else if (!wide && help.parentNode !== left) left.appendChild(help);
+    // 경기장 설정도 넓은 화면에선 오른쪽 패널로 (왼쪽 메뉴가 화면보다 길어져 따로 스크롤되지 않게)
+    const env = document.getElementById('env-box');
+    if (env) {
+      if (wide && env.parentNode !== slot) slot.insertBefore(env, slot.firstChild);
+      else if (!wide && env.parentNode !== left) left.insertBefore(env, help.parentNode === left ? help : null);
+    }
   }
 
   function init() {

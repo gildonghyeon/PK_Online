@@ -30,13 +30,13 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 
 /* ---------------- 로비 ---------------- */
 /* 로비는 불투명 배경: 휴대폰에서 로비를 스크롤해도 뒤에 남은 게임 화면이 비치지 않게 */
-#lobby { z-index: 10; background: #0f2a1b; }
+#lobby { z-index: 10; background: #0f2a1b; overflow-y: auto; } /* 넘치면 로비 전체가 한 번에 스크롤 (왼쪽 칸만 따로 스크롤하면 화면이 갈라져 보임) */
 .lobby-bg { position: fixed; inset: 0; z-index: -1;
   background:
     radial-gradient(1200px 600px at 75% 40%, rgba(198, 255, 61, 0.10), transparent 60%),
     repeating-linear-gradient(90deg, #0f2a1b 0 80px, #12301f 80px 160px);
 }
-.lobby-left { flex: 1; padding: 6vh 5vw; display: flex; flex-direction: column; gap: 22px; max-width: 620px; overflow-y: auto; }
+.lobby-left { flex: 1; padding: 6vh 5vw; display: flex; flex-direction: column; gap: 22px; max-width: 620px; }
 .logo { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-size: clamp(48px, 7vw, 96px); line-height: .9;
   color: var(--accent); text-shadow: 0 6px 0 #2a4a10; }
 .logo span { display: block; font-size: .42em; color: #fff; letter-spacing: 6px; text-shadow: none; margin-top: 6px; }
@@ -50,6 +50,21 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 .difficulty { display: flex; gap: 8px; align-items: center; padding-left: 8px; color: var(--muted); font-size: 14px; }
 .difficulty button { padding: 6px 14px; border-radius: 20px; background: rgba(255,255,255,.07); font-size: 13px; }
 .difficulty button.on { background: var(--accent); color: #102; font-weight: 700; }
+/* 연습 모드: 키커 연습 / 키퍼 연습 고르기 */
+.practice-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.practice-panel button { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 12px 14px; border-radius: 12px;
+  background: var(--panel); border: 1px solid var(--accent2); }
+.practice-panel button:hover { border-color: var(--accent); background: rgba(20, 50, 30, .9); }
+.practice-panel b { font-size: 15px; }
+.practice-panel span { font-size: 12px; color: var(--muted); }
+/* 경기장 환경: 시간 · 날씨 */
+.env-box { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.env-box h3 { font-size: 14px; }
+.env-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 13px; }
+.env-row span { width: 34px; flex: none; }
+.env-row button { padding: 6px 14px; border-radius: 20px; background: rgba(255,255,255,.07); font-size: 13px; }
+.env-row button.on { background: var(--accent); color: #102; font-weight: 700; }
+.env-note { font-size: 12px; color: var(--muted); }
 .controls-help { margin-top: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; font-size: 13px; color: var(--muted); }
 .controls-help h3 { color: var(--text); font-size: 14px; margin-bottom: 6px; }
 .controls-help li { list-style: none; margin: 4px 0; }
@@ -87,12 +102,24 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 .last-keeper b { color: var(--gold); }
 #last-body .sm-card { padding: 8px 10px 6px; }
 
+/* 로비 전체가 스크롤될 때 가운데 선수 미리보기는 화면에 고정 */
+@media (min-width: 861px) {
+  .lobby-right { position: sticky; top: 0; align-self: flex-start; height: 100vh; height: 100dvh; }
+}
 @media (min-width: 1280px) and (min-height: 600px) {
   /* 게임 메뉴는 왼쪽 끝에 그대로, 남는 폭은 가운데 선수 미리보기가 늘어나 채우고, 정보 패널은 오른쪽 끝 */
   .lobby-left { flex: 0 0 auto; width: min(560px, 32vw); padding: 6vh 2vw 5vh 5vw; }
   .lobby-right { flex: 1 1 auto; width: auto; max-width: 720px; margin: 0 auto; padding: 4vh 1.5vw 3vh; }
-  .lobby-info { display: flex; flex-direction: column; gap: 14px; flex: 0 0 auto; width: min(380px, 24vw); padding: 4vh 3vw 3vh 0; overflow-y: auto; }
+  .lobby-info { display: flex; flex-direction: column; gap: 14px; flex: 0 0 auto; width: min(380px, 24vw); padding: 4vh 3vw 3vh 0; }
   .lobby-info .controls-help { margin-top: 0; }
+  #help-slot { display: flex; flex-direction: column; gap: 14px; }
+  /* 칸마다 따로 스크롤하지 않고, 넘치면 로비 전체가 한 번에 스크롤 (가운데에 스크롤 막대가 생겨 화면이 갈라져 보이지 않게) */
+  #lobby { overflow-y: auto; }
+  .lobby-left, .lobby-info { overflow: visible; }
+  /* 메뉴 버튼은 조금 낮게: 메뉴가 다섯 개라 한 화면에 들어오게 */
+  .menu { gap: 10px; }
+  .menu-btn { padding: 14px 22px; }
+  .menu-title { font-size: 26px; }
 }
 /* 넓고 충분히 높은 화면: 왼쪽 로고·메뉴를 1.3배로 */
 @media (min-width: 1280px) and (min-height: 900px) {
@@ -314,21 +341,27 @@ body.touch #hud:has(#kick-panel.show) .instruction { display: none; }
 .sm-num.out.left { text-anchor: end; }
 
 /* 킥 준비 중 작은 슛 지도 (왼쪽 위) */
-.shot-mini { position: absolute; left: 50%; top: 162px; transform: translateX(-50%); width: 180px; pointer-events: none; opacity: .92; } /* 가운데 위 "1P 키커 / 골키퍼" 표시 바로 아래 */
+/* 경기 중 상대 분석: 가운데 위, "1P 키커 / 골키퍼" 표시 바로 아래에 낮고 넓은 카드 (HUD 세로 흐름을 따라 쌓임) */
+.shot-mini { position: relative; margin-top: 8px; width: 340px; max-width: calc(100vw - 24px); pointer-events: none; }
+.shot-mini .sm-card { display: grid; grid-template-columns: 104px 1fr; column-gap: 12px; align-items: center; }
+.shot-mini .sm-head { grid-column: 1 / -1; }
+.shot-mini .sm-tip { margin: 0; padding: 0 0 0 12px; border-top: none; border-left: 1px solid rgba(255,255,255,.14); }
+.shot-mini .sm-card:not(:has(.sm-svg)) .sm-tip { grid-column: 1 / -1; border-left: none; padding-left: 0; }
 .sm-card.mini { background: rgba(5, 12, 9, .82); padding: 8px 10px 6px; }
 .sm-card.mini .sm-head { font-size: 12px; margin-bottom: 4px; }
 .sm-card.mini .sm-head span { font-size: 11px; }
 .sm-shot.last .sm-dot, .sm-shot.last .sm-x { filter: drop-shadow(0 0 10px #fff); }
 @media (max-width: 860px) {
-  .shot-mini { width: 150px; }
+  .shot-mini { width: 320px; }
 }
 /* 터치 기기: 위쪽은 킥 패널 자리라 세로 화면은 오른쪽 중간, 가로 화면은 아래 가운데(조이스틱과 버튼 사이) */
-body.touch .shot-mini { left: 50%; right: auto; top: 160px; bottom: auto; transform: translateX(-50%); width: 132px; opacity: .92; }
+body.touch .shot-mini { width: min(330px, calc(100vw - 24px)); opacity: .95; } /* 세로 화면: 가운데 위 (역할 표시 아래) */
+body.touch .shot-mini .sm-card { grid-template-columns: 92px 1fr; column-gap: 10px; }
 body.touch .sm-card.mini { padding: 6px 7px 4px; }
 body.touch .sm-card.mini .sm-head { font-size: 11px; margin-bottom: 2px; }
 body.touch .sm-card.mini .sm-head span { font-size: 10px; }
 @media (max-height: 560px) {
-  body.touch .shot-mini { top: 12px; left: calc(8px + env(safe-area-inset-left, 0px)); transform: none; width: 118px; } /* 가로 화면: 1P 키커 아래는 골대 한가운데라 점수판 왼쪽 빈자리로 */
+  body.touch .shot-mini { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 300px; margin: 0; } /* 가로 화면: 골대 위 관중석 가운데 */
 }
 
 /* ---------------- 토너먼트 대진표 ---------------- */
@@ -371,6 +404,41 @@ body.touch .sm-card.mini .sm-head span { font-size: 10px; }
 @keyframes cup-bounce { from { transform: translateY(0) rotate(-4deg); } to { transform: translateY(-8px) rotate(4deg); } }
 @media (prefers-reduced-motion: reduce) { .tn-cup { animation: none; } }
 .tn-out { text-align: center; color: var(--muted); padding: 8px; }
+/* 상대 분석 카드: 골대 6칸 분포 + 습관 목록 */
+.tn-scout { margin-top: 10px; background: rgba(255,255,255,.04); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.sc-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.sc-head b { font-size: 14px; letter-spacing: 1px; }
+.sc-head span { font-size: 11px; color: var(--muted); }
+.sc-body { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.sc-goal { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(2, 1fr); width: 210px; height: 84px;
+  border: 4px solid #f4f4f4; border-bottom: none; border-radius: 3px 3px 0 0; box-shadow: 0 3px 0 rgba(120, 200, 90, .5); }
+.sc-goal i { font-style: normal; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  background: rgba(255, 77, 94, calc(0.08 + var(--heat) * 0.62)); color: #fff; border: 1px solid rgba(255,255,255,.08); }
+.sc-goal i.top { outline: 2px solid var(--gold); outline-offset: -3px; }
+.sc-facts { list-style: none; flex: 1; min-width: 200px; display: grid; gap: 4px; font-size: 13px; }
+.sc-facts li { display: flex; justify-content: space-between; gap: 10px; border-bottom: 1px dashed rgba(255,255,255,.08); padding-bottom: 3px; }
+.sc-facts span { color: var(--muted); }
+.sc-facts b.hi { color: var(--gold); }
+/* 동전 던지기 상자 안의 AI 성향 카드 */
+.coin-box .tn-scout { margin-top: 16px; text-align: left; width: 540px; max-width: 100%; }
+.coin-box .sc-goal { width: 180px; height: 72px; }
+@media (max-width: 520px) { .coin-box .sc-goal { width: 100%; } .coin-box { min-width: 0; width: calc(100vw - 32px); padding: 20px 16px; } }
+@media (max-height: 560px) {
+  .coin-box .tn-scout { margin-top: 8px; padding: 8px 10px; }
+  .coin-box .sc-head { margin-bottom: 4px; }
+  .coin-box .sc-goal { width: 150px; height: 56px; }
+  .coin-box .sc-facts li:nth-child(n+3) { display: none; }
+  .coin-box h2 { font-size: 24px; margin-bottom: 2px; }
+  .coin-box p { margin-bottom: 8px; }
+  .coin-box { padding: 14px 18px; }
+}
+/* 경기 중 분석: 지난 킥 지도 아래 두 줄 (이름 왼쪽 · 값 오른쪽) */
+.sm-tip { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; margin: 6px 0 2px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,.12); font-size: 12px; line-height: 1.3; }
+.sm-tip-who { grid-column: 1 / -1; font-size: 10px; letter-spacing: 1px; color: var(--gold); font-weight: 700; }
+.sm-tip dt { color: var(--muted); white-space: nowrap; }
+.sm-tip dd { margin: 0; text-align: right; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+body.touch .sm-tip { font-size: 11px; gap: 1px 6px; margin-top: 4px; padding-top: 4px; }
+body.touch .sm-tip-who { font-size: 9px; }
 .tour-btns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .tour-btns button { padding: 12px 22px; border-radius: 10px; background: rgba(255,255,255,.12); color: #fff; font-weight: 900; font-size: 15px; }
 .tour-btns .tour-primary { background: var(--accent); color: #102; }
@@ -449,8 +517,11 @@ body.touch .aim-power { left: -17px; top: -17px; width: 34px; height: 34px; }
   .hud-btn { top: calc(8px + env(safe-area-inset-top, 0px)); right: calc(8px + env(safe-area-inset-right, 0px)); width: 34px; height: 34px; font-size: 15px; }
   .kick-timer { top: calc(6px + env(safe-area-inset-top, 0px)); right: calc(52px + env(safe-area-inset-right, 0px));
     min-width: 40px; height: 40px; line-height: 34px; font-size: 20px; border-width: 3px; padding: 0 6px; }
-  .shot-mini, body.touch .shot-mini { top: calc(54px + env(safe-area-inset-top, 0px)); left: auto; right: calc(8px + env(safe-area-inset-right, 0px));
-    transform: none; width: 110px; }
+  /* 상대 분석: 골대 위 관중석 가운데에 한 줄 높이로 (점수판은 왼쪽 위, 타이머는 오른쪽 위) */
+  .shot-mini, body.touch .shot-mini { position: absolute; margin: 0; top: calc(6px + env(safe-area-inset-top, 0px)); left: 50%; right: auto; bottom: auto; transform: translateX(-50%); width: 290px; }
+  .shot-mini .sm-card, body.touch .shot-mini .sm-card { grid-template-columns: 70px 1fr; column-gap: 8px; padding: 4px 8px; }
+  .shot-mini .sm-head { display: none; }
+  .shot-mini .sm-svg { max-height: 34px; }
   body.touch #kick-panel .choice { left: 50%; transform: translateX(-50%); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); width: 210px; padding: 4px; }
   body.touch .aim-power { left: -15px; top: -15px; width: 30px; height: 30px; }
   body.touch .joy { width: 112px; height: 112px; left: calc(12px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }

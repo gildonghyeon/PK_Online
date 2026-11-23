@@ -252,8 +252,13 @@ PK.Game = (function () {
     st.shotLog = [];
     st.final = null;
     st.tour = (opts && opts.tour) || null;
+    st.practice = mode === 'practice' ? ((opts && opts.practice) || 'kick') : null; // 연습 모드: 'kick' 키커만 / 'keep' 키퍼만
     PK.AI.reset();
     if (st.tour) PK.AI.setProfile(st.tour.opp.profile); else PK.AI.clearProfile();
+    // 싱글 플레이: AI 도 경기마다 성향이 있음 (어느 쪽을 좋아하는지 등) → 동전 던지기 때 분석 카드로 보여 줌
+    st.persona = (mode === 'single' || mode === 'practice') && !st.tour && PK.Tour && PK.Tour.persona ? PK.Tour.persona() : null;
+    if (st.persona) PK.AI.setProfile(st.persona.profile);
+    st.scoutTips = st.tour ? st.tour.tips : st.persona ? st.persona.tips : null;
     const p1 = PK.Lobby.profile(0);
     let p2 = mode === 'multi' ? PK.Lobby.profile(1) : PK.Avatar.randomConfig(p1.uniform);
     if (st.tour) {
@@ -305,6 +310,17 @@ PK.Game = (function () {
     S.ball.position.copy(SPOT);
     PK.Audio.init();
     PK.Audio.crowd(0.15, 1);
+    // 경기장 환경: 화면은 설정대로, 공 물리(젖은 잔디·눈)는 온라인에선 양쪽이 같도록 맑음 기준
+    const env = PK.Env ? PK.Env.get() : { time: 'night', weather: 'clear' };
+    if (S.setEnv) S.setEnv(env);
+    PK.Physics.setSurface(mode === 'online' ? 'clear' : env.weather);
+    if (st.practice) { // 연습: 동전 던지기 없이 바로
+      st.first = st.practice === 'kick' ? 0 : 1;
+      st.state = 'busy';
+      setText('role-banner', ''); setText('instruction', ''); setText('round-label', '');
+      later(0.4, nextKick);
+      return;
+    }
     startCoin();
   }
 
@@ -436,6 +452,11 @@ PK.Game = (function () {
       $('coin-msg').textContent = PK.Online.isHost ? '앞면 또는 뒷면을 선택하세요 (맞히면 선공)' : '상대가 동전 면을 고르는 중...';
       $('coin-choices').style.display = PK.Online.isHost ? '' : 'none';
     }
+    // 싱글 플레이: 이번 AI 의 성향 분석
+    const box = document.querySelector('#coin .coin-box');
+    const old = box && box.querySelector('.tn-scout');
+    if (old) old.remove();
+    if (box && st.persona) box.appendChild(st.persona.card());
     show('coin', true);
   }
 
@@ -485,6 +506,17 @@ PK.Game = (function () {
     updateScoreboard();
   }
   function updateScoreboard() {
+    if (st.practice) { // 연습: 차는 쪽의 최근 10번만 점으로
+      [0, 1].forEach((t) => {
+        const dots = $('team' + t).querySelector('.dots'); dots.innerHTML = '';
+        const ks = st.kicks[t], from = Math.max(0, ks.length - 9);
+        if (t === nextKickerTeam()) {
+          for (let i = from; i <= ks.length; i++) { const d = document.createElement('i'); const k = ks[i]; d.className = 'dot' + (k === true ? ' goal' : k === false ? ' miss' : ' next'); dots.appendChild(d); }
+        }
+        $('score' + t).textContent = goals(t);
+      });
+      return;
+    }
     const n = Math.max(5, st.kicks[0].length, st.kicks[1].length + (0));
     const order = nextKickerTeam();
     [0, 1].forEach((t) => {
@@ -502,11 +534,13 @@ PK.Game = (function () {
   }
 
   function nextKickerTeam() {
+    if (st.practice) return st.practice === 'kick' ? 0 : 1;
     const a = st.first, b = 1 - st.first;
     return st.kicks[a].length === st.kicks[b].length ? a : b;
   }
 
   function checkEnd() {
+    if (st.practice) return -1; // 연습은 나갈 때까지 계속
     const a = goals(0), b = goals(1), ta = st.kicks[0].length, tb = st.kicks[1].length;
     if (ta < 5 || tb < 5) {
       const remA = Math.max(0, 5 - ta), remB = Math.max(0, 5 - tb);
@@ -529,7 +563,11 @@ PK.Game = (function () {
     st.netHits = 0; st.netSeen = 0; st.obsLaunched = false; st.liveFrozen = false;
     updateScoreboard();
     const kn = st.kicks[st.kickerTeam].length + 1;
-    setText('round-label', kn <= 5 ? `${kn}번째 키커` : `서든데스 ${kn - 5}라운드`);
+    if (st.practice) {
+      const ks = st.kicks[st.kickerTeam], n = ks.length, g = ks.filter((k) => k).length;
+      const ok = st.practice === 'kick' ? g : n - g; // 키커 연습은 골, 키퍼 연습은 막은 수(빗나감 포함)
+      setText('round-label', `${st.practice === 'kick' ? '키커' : '키퍼'} 연습 · ${kn}번째 · ${st.practice === 'kick' ? '골' : '선방'} ${ok}/${n}${n ? ` (${Math.round((ok / n) * 100)}%)` : ''}`);
+    } else setText('round-label', kn <= 5 ? `${kn}번째 키커` : `서든데스 ${kn - 5}라운드`);
     $('result-text').className = 'result-text';
 
     // 선수 배치
@@ -578,7 +616,7 @@ PK.Game = (function () {
       else beginKickerAim();
     } else {
       // AI 키커
-      const d = PK.AI.decideKick();
+      const d = PK.AI.decideKick({ pressure: kn > 5 && !st.practice }); // 서든데스에선 팀이 좋아하는 쪽으로 더 자주
       st.shot = computeShot(new V3(d.aim.x, d.aim.y, 0), d.power, d.sigma, d.type, false);
       st.aiStutter = d.stutter; // AI 키커가 달려가다 멈칫할지
       beginKeeperAim();
@@ -2052,10 +2090,33 @@ PK.Game = (function () {
     const box = $('shot-mini');
     if (!box) return;
     const t = st.kickerTeam;
-    const show = ['kickerAim', 'keeperReady', 'runup'].includes(st.state) && (st.shotLog || []).some((k) => k.team === t);
+    const hasLog = (st.shotLog || []).some((k) => k.team === t);
+    // 토너먼트·싱글: 상대 분석 두 줄 (내가 키퍼면 상대 키커 습관, 내가 키커면 상대 키퍼 습관)
+    const tips = st.scoutTips;
+    const tip = tips ? (st.teams[t].human ? tips.kicker : tips.keeper) : null;
+    const show = ['kickerAim', 'keeperReady', 'runup'].includes(st.state) && (hasLog || tip);
     if (!show) { if (!box.hidden) box.hidden = true; return; }
-    const key = t + ':' + st.shotLog.length;
-    if (box.dataset.key !== key) { box.dataset.key = key; box.textContent = ''; box.appendChild(shotCard(t, true)); }
+    const key = t + ':' + (st.shotLog || []).length;
+    if (box.dataset.key !== key) {
+      box.dataset.key = key; box.textContent = '';
+      // 지난 킥 지도와 분석을 카드 하나로
+      let card;
+      if (hasLog) card = shotCard(t, true, st.practice ? st.shotLog.filter((k) => k.team === t).slice(-10) : null); // 연습은 최근 10번만
+      else {
+        card = document.createElement('div'); card.className = 'sm-card mini';
+        const h = document.createElement('div'); h.className = 'sm-head';
+        const b = document.createElement('b'); b.textContent = '상대 분석'; h.appendChild(b); card.appendChild(h);
+      }
+      if (tip) {
+        const d = document.createElement('dl'); d.className = 'sm-tip';
+        const who = document.createElement('div'); who.className = 'sm-tip-who';
+        who.textContent = st.teams[t].human ? '상대 키퍼 습관' : '상대 키커 습관';
+        d.appendChild(who);
+        tip.forEach(([k, v]) => { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = k; dd.textContent = v; d.append(dt, dd); });
+        card.appendChild(d);
+      }
+      box.appendChild(card);
+    }
     box.hidden = false;
   }
 
@@ -2247,6 +2308,7 @@ PK.Game = (function () {
 
     S.net.update(dt);
     S.crowd._dt = dt; S.crowd.update(st.time);
+    if (S.updateWeather) S.updateWeather(dt); // 비·눈
     S.adTex.offset.x = (st.time * 0.03) % 1;
     if (S.leds) S.leds.forEach((t) => { t.offset.x = (-st.time * 0.05) % 1; }); // 관중석 앞 LED 광고가 흘러감
 

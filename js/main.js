@@ -1,6 +1,17 @@
 // 진입점: 렌더러/씬 생성, 로비 ↔ 게임 전환, 메인 루프
 window.PK = window.PK || {};
 
+// 경기장 환경 설정 (시간·날씨). 이 브라우저에 기억
+PK.Env = (function () {
+  const KEY = 'pk_env';
+  let env = { time: 'night', weather: 'clear' };
+  try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) env = Object.assign(env, s); } catch (e) { /* 저장소 없음 */ }
+  return {
+    get: () => Object.assign({}, env),
+    set(k, v) { env[k] = v; try { localStorage.setItem(KEY, JSON.stringify(env)); } catch (e) { /* 무시 */ } },
+  };
+})();
+
 PK.Main = (function () {
   let renderer, scene, camera, stadium, last = performance.now();
 
@@ -35,10 +46,31 @@ PK.Main = (function () {
     document.querySelectorAll('.menu-btn').forEach((b) => b.addEventListener('click', () => {
       PK.Audio.init(); PK.Audio.click();
       if (b.dataset.mode === 'online') { PK.Online.togglePanel(); return; }
+      if (b.dataset.mode === 'practice') { const pp = document.getElementById('practice-panel'); pp.hidden = !pp.hidden; return; }
       if (b.dataset.mode === 'tournament') { PK.Tour.open(); return; }
       PK.Lobby.hide();
       PK.Game.start(b.dataset.mode);
     }));
+    // 연습 모드: 키커 연습 / 키퍼 연습
+    document.querySelectorAll('#practice-panel button').forEach((b) => b.addEventListener('click', () => {
+      PK.Audio.init(); PK.Audio.click();
+      PK.Lobby.hide();
+      PK.Game.start('practice', { practice: b.dataset.practice });
+    }));
+    // 경기장 환경: 시간 · 날씨
+    const ENV_NOTE = { rain: '비: 젖은 잔디라 공이 낮게 미끄러지고, 키퍼가 공을 놓치기 쉬워요', snow: '눈: 공이 덜 튀고 빨리 멈춰요', clear: '' };
+    const paintEnv = () => {
+      const e = PK.Env.get();
+      document.querySelectorAll('#env-time button').forEach((x) => x.classList.toggle('on', x.dataset.v === e.time));
+      document.querySelectorAll('#env-weather button').forEach((x) => x.classList.toggle('on', x.dataset.v === e.weather));
+      const note = document.getElementById('env-note'); if (note) { note.textContent = ENV_NOTE[e.weather] || ''; note.hidden = !note.textContent; }
+      if (stadium.setEnv) stadium.setEnv(e);
+    };
+    [['env-time', 'time'], ['env-weather', 'weather']].forEach(([id, key]) => document.querySelectorAll('#' + id + ' button').forEach((b) => b.addEventListener('click', () => {
+      PK.Audio.init(); PK.Audio.click();
+      PK.Env.set(key, b.dataset.v); paintEnv();
+    })));
+    paintEnv();
     // 온라인: 상대와 연결되면 바로 경기 시작
     PK.Online.init();
     PK.Online.onMatched(() => {

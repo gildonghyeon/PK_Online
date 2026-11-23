@@ -19,14 +19,19 @@ PK.AI = (function () {
   const GP = (key, def) => (profile && profile.keep && profile.keep[key] !== undefined ? profile.keep[key] : def);
 
   // 키커 결정: {aim:{x,y}, power, curve}
-  function decideKick() {
+  //  ctx.pressure: 서든데스처럼 꼭 넣어야 하는 킥 → 팀이 좋아하는 쪽(fav)으로 더 자주 감
+  //  ctx.scout: 상대 분석용 표본 (사람 기록은 보지 않음)
+  function decideKick(ctx) {
+    ctx = ctx || {};
     const L = LEVEL[level];
     const G = PK.GOAL;
     // 사람 키퍼가 자주 가는 쪽 반대로
     let side;
-    const dives = memory.diveX.slice(-5);
+    const dives = ctx.scout ? [] : memory.diveX.slice(-5);
+    const fav = KP('fav', null); // { side: -1 왼쪽 / 1 오른쪽 (키커 쪽에서 본), rate, clutch }
     const r = Math.random();
     if (r < KP('center', 0.1)) side = 0;
+    else if (fav && Math.random() < fav.rate + (ctx.pressure ? fav.clutch || 0 : 0)) side = fav.side;
     else if (dives.length >= 2 && Math.random() < KP('adapt', 0.6)) {
       const avg = dives.reduce((a, b) => a + sideOf(b), 0) / dives.length;
       side = avg > 0.2 ? -1 : avg < -0.2 ? 1 : (Math.random() < 0.5 ? -1 : 1);
@@ -48,7 +53,7 @@ PK.AI = (function () {
     if (side !== 0 && Math.random() < curlRate) { curve = -side * rand(0.2, 0.6); x += side * 0.15; }
     x = Math.max(-G.halfW + 0.25, Math.min(G.halfW - 0.25, x));
     // 킥 종류 / 멈칫: 사람 키퍼가 일찍 뛰는 버릇이 있으면 멈칫·파넨카를 더 자주 씀
-    const recent = memory.timing.slice(-5);
+    const recent = ctx.scout ? [] : memory.timing.slice(-5);
     const earlyRate = recent.length ? recent.filter((t) => t !== 'late').length / recent.length : 0.5;
     const lateRate = recent.length ? recent.filter((t) => t === 'late').length / recent.length : 0.2;
     let type = Math.random() < curlRate ? 'curl' : 'instep';
@@ -101,8 +106,21 @@ PK.AI = (function () {
     return r < pLate ? 'late' : r < pLate + pEarly ? 'early' : 'normal';
   }
 
+  // 상대 분석: 이 팀 성향으로 실제 킥 결정을 n번 뽑아 봄 (같은 팀은 늘 같은 결과가 나오게 시드 고정)
+  function scout(p, n, seed, pressure) {
+    const sp = profile, sl = level, rnd = Math.random;
+    let a = seed >>> 0 || 1;
+    Math.random = () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    try {
+      profile = p; if (p && p.level) level = p.level;
+      const out = [];
+      for (let i = 0; i < n; i++) out.push(decideKick({ scout: true, pressure: !!pressure }));
+      return out;
+    } finally { Math.random = rnd; profile = sp; level = sl; }
+  }
+
   return {
-    decideShift, decideTiming,
+    decideShift, decideTiming, scout,
     rememberTiming(t) { memory.timing.push(t); },
     rememberKickStyle(type, stutter) { memory.style.push({ type, stutter }); },
     setLevel(l) { level = l; if (!profile) savedLevel = null; },

@@ -444,6 +444,76 @@ if (vPart > 1.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;`);
     scene.add(traj);
     out.traj = traj;
 
+    // ---------- 경기장 환경: 시간(낮·해질녘·밤) + 날씨(맑음·비·눈) ----------
+    //  조명·하늘·안개를 바꾸고, 비·눈 입자를 카메라 주변에 뿌림 (공 물리 변화는 physics.js 의 surface)
+    const glows = [];
+    scene.traverse((o) => { if (o.isSprite && o.material === glowM) glows.push(o); });
+    const TIME = {
+      // grade: 화면 전체 색감 (관중석이 하늘을 거의 가려서 조명만으로는 차이가 잘 안 보임)
+      day:    { bg: '#9cc9f2', fog: '#b7d3ec', near: 70, far: 190, hemiSky: '#f4f9ff', hemiGround: '#4a6a32', hemi: 1.1, sun: '#fffaf0', sunI: 1.45, sunPos: [-6, 40, 12], fill: '#dbe8ff', fillI: 0.5, glow: 0, grade: 'brightness(1.08) saturate(1.12)' },
+      sunset: { bg: '#e89a62', fog: '#d98e63', near: 55, far: 160, hemiSky: '#ffc999', hemiGround: '#3a2c1c', hemi: 0.62, sun: '#ff9f55', sunI: 1.25, sunPos: [-34, 8, 6], fill: '#7f8fff', fillI: 0.3, glow: 0.5, grade: 'sepia(0.32) saturate(1.3) hue-rotate(-10deg) brightness(0.97)' },
+      night:  { bg: '#0b1626', fog: '#0b1626', near: 60, far: 140, hemiSky: '#bcd6ff', hemiGround: '#1d3018', hemi: 0.42, sun: '#f4f1ff', sunI: 1.0, sunPos: [-12, 26, 18], fill: '#86aef5', fillI: 0.4, glow: 1, grade: 'brightness(0.9) contrast(1.08) saturate(0.95)' },
+    };
+    // 비·눈 입자
+    const PN = 2600, AREA = { x: 18, y: 16, z0: -4, z1: 22 };
+    const pp = new Float32Array(PN * 6), pv = new Float32Array(PN);
+    const pGeo = new THREE.BufferGeometry();
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pp, 3));
+    const rainM = new THREE.LineBasicMaterial({ color: '#c9dcff', transparent: true, opacity: 0.6, depthWrite: false });
+    const rain = new THREE.LineSegments(pGeo, rainM); rain.frustumCulled = false; rain.visible = false; scene.add(rain);
+    const sGeo = new THREE.BufferGeometry();
+    const sp = new Float32Array(PN * 3);
+    sGeo.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    const snowM = new THREE.PointsMaterial({ color: '#ffffff', size: 0.09, transparent: true, opacity: 0.95, depthWrite: false });
+    const snow = new THREE.Points(sGeo, snowM); snow.frustumCulled = false; snow.visible = false; scene.add(snow);
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    for (let i = 0; i < PN; i++) {
+      const x = rnd(-AREA.x, AREA.x), y = rnd(0, AREA.y), z = rnd(AREA.z0, AREA.z1);
+      pp.set([x, y, z, x + 0.07, y + 0.75, z], i * 6); sp.set([x, y, z], i * 3); pv[i] = rnd(0.8, 1.2);
+    }
+    let weather = 'clear';
+    out.setEnv = (env) => {
+      const T = TIME[env.time] || TIME.night;
+      const wet = env.weather === 'rain', cold = env.weather === 'snow';
+      const dim = wet ? 0.72 : cold ? 0.9 : 1;
+      const bg = new THREE.Color(T.bg);
+      if (wet) bg.lerp(new THREE.Color('#596673'), env.time === 'night' ? 0.15 : 0.55);
+      if (cold) bg.lerp(new THREE.Color('#d7dee6'), env.time === 'night' ? 0.1 : 0.45);
+      scene.background = bg;
+      scene.fog.color.copy(bg); scene.fog.near = T.near * (wet ? 0.6 : cold ? 0.7 : 1); scene.fog.far = T.far * (wet ? 0.7 : cold ? 0.8 : 1);
+      hemi.color.set(T.hemiSky); hemi.groundColor.set(cold ? '#9aa79c' : T.hemiGround); hemi.intensity = T.hemi * (cold ? 1.15 : dim);
+      sun.color.set(T.sun); sun.intensity = T.sunI * dim; sun.position.set(...T.sunPos);
+      fill.color.set(T.fill); fill.intensity = T.fillI;
+      glows.forEach((g) => { g.visible = T.glow > 0; g.material.opacity = T.glow; });
+      // 젖은 잔디는 살짝 반질반질, 눈 덮인 잔디는 하얗게
+      pitchM.roughness = wet ? 0.62 : 0.95;
+      pitchM.color.set(cold ? '#d9e4dc' : wet ? '#c9d6c6' : '#ffffff');
+      weather = env.weather;
+      rain.visible = wet; snow.visible = cold;
+      const cv = document.getElementById('game-canvas');
+      if (cv) cv.style.filter = [T.grade, wet ? 'brightness(0.8) saturate(0.68) contrast(0.95)' : cold ? 'brightness(1.06) saturate(0.78)' : ''].join(' ').trim();
+    };
+    // 매 프레임: 빗줄기·눈송이 떨어뜨리기
+    out.updateWeather = (dt) => {
+      if (weather === 'rain') {
+        for (let i = 0; i < PN; i++) {
+          const o = i * 6; let y = pp[o + 1] - 18 * pv[i] * dt;
+          if (y < 0) { y += AREA.y; const x = rnd(-AREA.x, AREA.x), z = rnd(AREA.z0, AREA.z1); pp[o] = x; pp[o + 2] = z; pp[o + 3] = x + 0.07; pp[o + 5] = z; }
+          pp[o + 1] = y; pp[o + 4] = y + 0.75;
+        }
+        pGeo.attributes.position.needsUpdate = true;
+      } else if (weather === 'snow') {
+        const t = performance.now() / 1000;
+        for (let i = 0; i < PN; i++) {
+          const o = i * 3; let y = sp[o + 1] - 1.1 * pv[i] * dt;
+          sp[o] += Math.sin(t * 0.9 + i) * 0.25 * dt;
+          if (y < 0) { y += AREA.y; sp[o] = rnd(-AREA.x, AREA.x); sp[o + 2] = rnd(AREA.z0, AREA.z1); }
+          sp[o + 1] = y;
+        }
+        sGeo.attributes.position.needsUpdate = true;
+      }
+    };
+
     return out;
   }
 

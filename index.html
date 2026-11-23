@@ -38,6 +38,14 @@
           <span class="menu-title">멀티 플레이</span>
           <span class="menu-sub">한 화면에서 친구와 번갈아 대결</span>
         </button>
+        <button class="menu-btn" data-mode="practice">
+          <span class="menu-title">연습 모드</span>
+          <span class="menu-sub">키커나 키퍼 하나만 골라 끝없이 연습</span>
+        </button>
+        <div class="practice-panel" id="practice-panel" hidden>
+          <button data-practice="kick"><b>⚽ 키커 연습</b><span>AI 키퍼를 상대로 슛만</span></button>
+          <button data-practice="keep"><b>🧤 키퍼 연습</b><span>AI 키커의 슛을 막기만</span></button>
+        </div>
         <button class="menu-btn" data-mode="online">
           <span class="menu-title">온라인 대전</span>
           <span class="menu-sub">방 코드로 다른 기기의 친구와 대결 (1P 선수로 출전)</span>
@@ -61,6 +69,13 @@
           <div class="op-rooms" id="op-rooms" hidden></div>
           <p class="op-diag" id="op-diag"></p>
         </div>
+      </div>
+
+      <div class="env-box" id="env-box">
+        <h3>경기장</h3>
+        <div class="env-row" id="env-time"><span>시간</span><button data-v="day">낮</button><button data-v="sunset">해질녘</button><button data-v="night">밤</button></div>
+        <div class="env-row" id="env-weather"><span>날씨</span><button data-v="clear">맑음</button><button data-v="rain">비</button><button data-v="snow">눈</button></div>
+        <p class="env-note" id="env-note"></p>
       </div>
 
       <div class="controls-help">

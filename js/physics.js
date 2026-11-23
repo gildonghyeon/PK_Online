@@ -10,6 +10,13 @@ PK.Physics = (function () {
   const V3 = THREE.Vector3;
 
   const tmp = new V3(), tmp2 = new V3(), tmp3 = new V3();
+  // 경기장 바닥 상태: 'clear' | 'rain'(젖은 잔디: 공이 미끄러지듯 빠르게 구르고, 키퍼가 공을 놓치기 쉬움) | 'snow'(공이 덜 튀고 빨리 멈춤)
+  let surface = 'clear';
+  const SURF = {
+    clear: { bounceY: 0.52, bounceXZ: 0.86, roll: 0.9, catchMul: 1 },
+    rain:  { bounceY: 0.42, bounceXZ: 0.95, roll: 0.45, catchMul: 0.72 },
+    snow:  { bounceY: 0.36, bounceXZ: 0.78, roll: 1.8, catchMul: 0.9 },
+  };
 
   function accel(v, spin, out) {
     const sp = v.length();
@@ -106,11 +113,12 @@ PK.Physics = (function () {
       if (s.v.y < 0) {
         const vy = -s.v.y;
         if (vy > 1.0) events.push({ type: 'bounce', speed: vy });
-        s.v.y = vy > 0.6 ? vy * 0.52 : 0;
-        s.v.x *= 0.86; s.v.z *= 0.86;
+        const sf = SURF[surface];
+        s.v.y = vy > 0.6 ? vy * sf.bounceY : 0;
+        s.v.x *= sf.bounceXZ; s.v.z *= sf.bounceXZ;
       }
       // 구름 마찰
-      const k = Math.exp(-0.9 * dt);
+      const k = Math.exp(-SURF[surface].roll * dt);
       s.v.x *= k; s.v.z *= k;
       s.spin.multiplyScalar(Math.exp(-3 * dt));
     }
@@ -154,7 +162,7 @@ PK.Physics = (function () {
           const speed = rel.length();
           // 잡기 판정: 손/글러브로, 충분히 느리고, 정면에 가까울 때
           const frontal = -vn / speed;
-          const catchChance = c.part === 'hand' ? Math.max(0, Math.min(0.92, (24 - speed) / 9)) * (0.4 + 0.6 * frontal) * (env.catchSkill || 1) : 0;
+          const catchChance = c.part === 'hand' ? Math.max(0, Math.min(0.92, (24 - speed) / 9)) * (0.4 + 0.6 * frontal) * (env.catchSkill || 1) * SURF[surface].catchMul : 0;
           if (!env.touched && Math.random() < catchChance) {
             s.held = true; s.v.set(0, 0, 0);
             events.push({ type: 'catch', part: c.part, speed });
@@ -210,5 +218,6 @@ PK.Physics = (function () {
     }
   }
 
-  return { BALL_R, solveLaunch, flyToLine, spinFromCurve, step, closestOnSeg };
+  return { BALL_R, solveLaunch, flyToLine, spinFromCurve, step, closestOnSeg,
+    setSurface(w) { surface = SURF[w] ? w : 'clear'; }, surface: () => surface };
 })();
