@@ -29,8 +29,9 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 #loading.hide { display: none; }
 
 /* ---------------- 로비 ---------------- */
-#lobby { z-index: 10; }
-.lobby-bg { position: absolute; inset: 0; z-index: -1;
+/* 로비는 불투명 배경: 휴대폰에서 로비를 스크롤해도 뒤에 남은 게임 화면이 비치지 않게 */
+#lobby { z-index: 10; background: #0f2a1b; }
+.lobby-bg { position: fixed; inset: 0; z-index: -1;
   background:
     radial-gradient(1200px 600px at 75% 40%, rgba(198, 255, 61, 0.10), transparent 60%),
     repeating-linear-gradient(90deg, #0f2a1b 0 80px, #12301f 80px 160px);

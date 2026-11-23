@@ -154,6 +154,9 @@ PK.Lobby = (function () {
     camera.updateProjectionMatrix();
   }
 
+  // 로비에 있는 동안 게임 캔버스를 숨김: 마지막 경기 장면이 로비 뒤로 비치지 않게
+  function setGameCanvas(on) { const c = document.getElementById('game-canvas'); if (c) c.style.visibility = on ? '' : 'hidden'; }
+
   function update() {
     if (!active || !renderer) return;
     const t = (performance.now() - t0) / 1000;
@@ -255,8 +258,8 @@ PK.Lobby = (function () {
 
   return {
     init, update, resize,
-    show() { active = true; document.getElementById('lobby').classList.add('active'); renderInfo(); placeHelp(); setTimeout(resize, 0); },
-    hide() { active = false; document.getElementById('lobby').classList.remove('active'); },
+    show() { active = true; document.getElementById('lobby').classList.add('active'); setGameCanvas(false); renderInfo(); placeHelp(); setTimeout(resize, 0); },
+    hide() { active = false; document.getElementById('lobby').classList.remove('active'); setGameCanvas(true); },
     profile(i) { return profiles[i]; },
     _cam: () => camera, // 점검용
     _avatar: () => avatar,
