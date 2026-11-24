@@ -923,7 +923,7 @@ PK.Game = (function () {
       const LA = R.launch;
       if (!st.obsLaunched && run && run.kicked && LA && LA.gid === st.gid && LA.n === n) startObserverFlight(LA);
       if ((st.state === 'runup' || st.state === 'flight') && R.res && R.res.gid === st.gid && R.res.n === n) {
-        showResult(!!R.res.goal, String(R.res.text || '').slice(0, 20), ['goal', 'save', 'miss'].includes(R.res.cls) ? R.res.cls : 'miss');
+        showResult(!!R.res.goal, String(R.res.text || '').slice(0, 60), ['goal', 'save', 'miss'].includes(R.res.cls) ? R.res.cls : 'miss');
       }
     }
   }
@@ -2017,28 +2017,48 @@ PK.Game = (function () {
     if (!F || F.resolved || F.observer) return;
     F.resolved = true;
     const goal = F.outcome === 'goal';
+    // 중계 자막처럼: 큰 한마디 | 무슨 일이 있었는지 한 줄
+    const where = spotName(st.shot.target);
     let text, cls;
     if (goal) {
-      text = F.events.post ? '골대 맞고 골!' : F.events.keeper ? '손 맞고 골!'
-        : st.shot.redirected ? '역모션 골!' : st.shot.type === 'panenka' ? '파넨카!!' : '골!!';
+      text = F.events.post ? '골!|골대를 맞고 들어갔어요' : F.events.keeper ? '골!|키퍼 손에 맞고 들어갔어요'
+        : st.shot.redirected ? '골!|역모션에 키퍼가 속았어요' : st.shot.type === 'panenka' ? '파넨카!|가운데로 살짝 띄워 성공' : '골!|' + where;
       cls = 'goal';
-    } else if (F.events.catch) { text = '캐치!'; cls = 'save'; }
-    else if (F.events.keeper) { text = '선방!'; cls = 'save'; }
-    else if (F.events.post) { text = '골대!'; cls = 'miss'; }
-    else if (F.outcome === 'over') { text = '홈런…'; cls = 'miss'; }
-    else { text = '빗나감!'; cls = 'miss'; }
+    } else if (F.events.catch) { text = '캐치!|키퍼가 두 손으로 잡아냈어요'; cls = 'save'; }
+    else if (F.events.keeper) { text = '선방!|키퍼가 몸을 날려 쳐냈어요'; cls = 'save'; }
+    else if (F.events.post) { text = '골대!|골대를 맞고 나왔어요'; cls = 'miss'; }
+    else if (F.outcome === 'over') { text = '실축!|크로스바 위로 떴어요'; cls = 'miss'; }
+    else { text = '실축!|골대 밖으로 빗나갔어요'; cls = 'miss'; }
 
     if (online()) { PK.Online.set({ res: { gid: st.gid, n: kickN(), goal, text, cls } }); st.liveFrozen = true; }
     showResult(goal, text, cls);
   }
 
+  // 골문 위치 이름 (키커 쪽에서 본 화면 기준)
+  function spotName(p) {
+    if (!p) return '골문 안으로';
+    const side = p.x < -1.2 ? '왼쪽' : p.x > 1.2 ? '오른쪽' : '가운데';
+    const h = p.y < 0.8 ? '아래' : p.y > 1.6 ? '위' : '';
+    if (side === '가운데') return h === '위' ? '가운데 높이 꽂았어요' : h === '아래' ? '가운데 낮게 깔았어요' : '정면으로 강하게';
+    return side + (h ? ' ' + h : '') + (Math.abs(p.x) > 2.4 ? ' 구석' : '') + '으로 정확하게';
+  }
+  const RESULT_WORD = { goal: 'GOAL !', save: 'SAVE !', miss: 'MISS !' }; // 큰 글자는 결과 종류마다 하나로 통일
   function showResult(goal, text, cls) {
     if (st.flight) st.flight.resolved = true; // 키커 쪽 시뮬레이션도 결과 카메라로 넘김
     const rt = $('result-text');
-    rt.textContent = text;
-    rt.className = 'result-text show ' + cls;
+    // 중계 자막: 비스듬한 색 띠(태그 + 큰 한마디) + 아래 한 줄 설명
+    const sub = String(text).split('|')[1];
+    const main = RESULT_WORD[cls] || String(text).split('|')[0];
+    rt.textContent = '';
+    const band = document.createElement('div'); band.className = 'rt-band';
+    const big = document.createElement('span'); big.className = 'rt-main'; big.textContent = main;
+    band.appendChild(big); rt.appendChild(band);
+    // 설명 줄은 화면에 띄우지 않음 (슛 지도 기록에만 남김)
+    rt.className = 'result-text ' + cls;
+    void rt.offsetWidth; // 다시 나타나는 효과가 매번 처음부터
+    rt.classList.add('show');
     st.kicks[st.kickerTeam].push(goal);
-    logShot(cls, text);
+    logShot(cls, sub ? main + ' ' + sub : main);
     updateScoreboard();
 
     // 관중: 골이면 차는 팀 응원석이, 막히거나 빗나가면 키퍼 팀 응원석이 일어나 환호 (반대쪽은 머리를 감쌈)
