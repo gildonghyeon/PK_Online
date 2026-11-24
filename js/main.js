@@ -29,11 +29,13 @@ PK.Main = (function () {
       return;
     }
     const canvas = document.getElementById('game-canvas');
+    // 휴대폰(터치 화면 + 작은 화면): 해상도 배율·그림자·관중을 가볍게 해서 끊기지 않게
+    PK.lowPower = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) <= 900);
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    renderer.setPixelRatio(Math.min(PK.lowPower ? 1.5 : 2, window.devicePixelRatio));
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = PK.lowPower ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(32, 1, 0.1, 300);
     camera.position.set(0, 1.75, 15.6);

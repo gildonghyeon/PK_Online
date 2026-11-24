@@ -171,6 +171,18 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 .role-banner { margin-top: 12px; padding: 6px 18px; border-radius: 30px; background: rgba(0,0,0,.6); font-weight: 900; font-size: 16px; }
 .instruction { margin-top: 8px; font-size: 14px; color: #fff; text-shadow: 0 1px 4px #000; background: rgba(0,0,0,.35); padding: 4px 12px; border-radius: 8px; }
 .instruction:empty, .role-banner:empty { display: none; }
+/* 위쪽 한 줄: 왼쪽에 '몇 번째 키커 · 1P 키커/골키퍼', 가운데 점수판 (점수판은 화면 가운데 그대로) */
+.hud-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; column-gap: 12px; width: 100%; margin-top: 14px; }
+.hud-top .scoreboard { margin-top: 0; grid-column: 2; }
+.hud-tags { grid-column: 1; justify-self: end; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.hud-tags .round-label, .hud-tags .role-banner { margin: 0; white-space: nowrap; }
+.hud-tags:not(:has(.role-banner:not(:empty))):not(:has(.round-label:not(:empty))) { visibility: hidden; }
+/* 좁은 세로 화면: 옆에 자리가 없으니 점수판 바로 아래 한 줄로 */
+@media (max-width: 760px) {
+  .hud-top { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .hud-tags { order: 2; flex-direction: row; align-items: center; gap: 8px; }
+  .hud-pad { display: none; }
+}
 .kick-panel { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); display: none; gap: 30px;
   background: rgba(5, 12, 9, .82); border: 1px solid var(--line); border-radius: 14px; padding: 12px 22px; }
 .kick-panel.show { display: flex; }
@@ -358,8 +370,11 @@ body.touch #hud:has(#kick-panel.show) .instruction { display: none; }
 
 /* 킥 준비 중 작은 슛 지도 (왼쪽 위) */
 /* 경기 중 상대 분석: 가운데 위, "1P 키커 / 골키퍼" 표시 바로 아래에 낮고 넓은 카드 (HUD 세로 흐름을 따라 쌓임) */
-.shot-mini { position: relative; margin-top: 8px; width: 340px; max-width: calc(100vw - 24px); pointer-events: none; }
-.shot-mini .sm-card { display: grid; grid-template-columns: 104px 1fr; column-gap: 12px; align-items: center; }
+.shot-mini { position: relative; margin-top: 6px; width: 300px; max-width: calc(100vw - 24px); pointer-events: none; } /* 점수판 바로 아래, 골대를 가리지 않게 낮게 */
+.shot-mini .sm-card.mini { padding: 4px 10px 4px; }
+.shot-mini .sm-card.mini .sm-head { font-size: 11px; margin-bottom: 2px; }
+.shot-mini .sm-svg { max-height: 40px; }
+.shot-mini .sm-card { display: grid; grid-template-columns: 96px 1fr; column-gap: 10px; align-items: center; }
 .shot-mini .sm-head { grid-column: 1 / -1; }
 .shot-mini .sm-tip { margin: 0; padding: 0 0 0 12px; border-top: none; border-left: 1px solid rgba(255,255,255,.14); }
 .shot-mini .sm-card:not(:has(.sm-svg)) .sm-tip { grid-column: 1 / -1; border-left: none; padding-left: 0; }
@@ -368,16 +383,16 @@ body.touch #hud:has(#kick-panel.show) .instruction { display: none; }
 .sm-card.mini .sm-head span { font-size: 11px; }
 .sm-shot.last .sm-dot, .sm-shot.last .sm-x { filter: drop-shadow(0 0 10px #fff); }
 @media (max-width: 860px) {
-  .shot-mini { width: 320px; }
+  .shot-mini { width: 300px; }
 }
 /* 터치 기기: 위쪽은 킥 패널 자리라 세로 화면은 오른쪽 중간, 가로 화면은 아래 가운데(조이스틱과 버튼 사이) */
-body.touch .shot-mini { width: min(330px, calc(100vw - 24px)); opacity: .95; } /* 세로 화면: 가운데 위 (역할 표시 아래) */
+body.touch .shot-mini { width: min(300px, calc(100vw - 24px)); opacity: .95; } /* 세로 화면: 점수판 아래 */
 body.touch .shot-mini .sm-card { grid-template-columns: 92px 1fr; column-gap: 10px; }
 body.touch .sm-card.mini { padding: 6px 7px 4px; }
 body.touch .sm-card.mini .sm-head { font-size: 11px; margin-bottom: 2px; }
 body.touch .sm-card.mini .sm-head span { font-size: 10px; }
 @media (max-height: 560px) {
-  body.touch .shot-mini { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); width: 300px; margin: 0; } /* 가로 화면: 골대 위 관중석 가운데 */
+  body.touch .shot-mini { width: 260px; } /* 낮은 화면: 점수판 아래 작게 */
 }
 
 /* ---------------- 토너먼트 대진표 ---------------- */
@@ -540,8 +555,14 @@ body.touch .aim-power { left: -17px; top: -17px; width: 34px; height: 34px; }
   .dots { gap: 3px; margin-top: 3px; }
   .dot { width: 10px; height: 10px; border-width: 1.5px; font-size: 0; line-height: 0; }
   .score { font-size: 24px; gap: 4px; }
-  .round-label { position: absolute; top: calc(54px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); margin: 0; font-size: 11px; }
-  .role-banner { position: absolute; top: calc(72px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); margin: 0; padding: 3px 10px; font-size: 12px; }
+  /* 점수판(왼쪽 위) 바로 오른쪽에 표시들, 그 아래 킥 전적 */
+  .hud-top { position: absolute; top: calc(6px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); width: auto; margin: 0;
+    display: flex; flex-direction: row; align-items: flex-start; gap: 8px; }
+  .hud-top .scoreboard { position: static; }
+  .hud-tags { order: 2; flex-direction: column; align-items: flex-start; gap: 4px; }
+  .hud-pad { display: none; }
+  .round-label { margin: 0; font-size: 11px; }
+  .role-banner { margin: 0; padding: 3px 10px; font-size: 12px; }
   .instruction { position: absolute; top: calc(100px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); margin: 0;
     max-width: 34vw; font-size: 11px; padding: 3px 8px; }
   .result-text { top: 50%; gap: 6px; }
@@ -551,7 +572,7 @@ body.touch .aim-power { left: -17px; top: -17px; width: 34px; height: 34px; }
   .kick-timer { top: calc(6px + env(safe-area-inset-top, 0px)); right: calc(52px + env(safe-area-inset-right, 0px));
     min-width: 40px; height: 40px; line-height: 34px; font-size: 20px; border-width: 3px; padding: 0 6px; }
   /* 상대 분석: 골대 위 관중석 가운데에 한 줄 높이로 (점수판은 왼쪽 위, 타이머는 오른쪽 위) */
-  .shot-mini, body.touch .shot-mini { position: absolute; margin: 0; top: calc(6px + env(safe-area-inset-top, 0px)); left: 50%; right: auto; bottom: auto; transform: translateX(-50%); width: 290px; }
+  .shot-mini, body.touch .shot-mini { position: absolute; margin: 0; top: calc(60px + env(safe-area-inset-top, 0px)); left: calc(8px + env(safe-area-inset-left, 0px)); right: auto; bottom: auto; transform: none; width: 200px; }
   .shot-mini .sm-card, body.touch .shot-mini .sm-card { grid-template-columns: 70px 1fr; column-gap: 8px; padding: 4px 8px; }
   .shot-mini .sm-head { display: none; }
   .shot-mini .sm-svg { max-height: 34px; }

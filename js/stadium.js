@@ -71,7 +71,7 @@ PK.Stadium = (function () {
     sun.position.set(-12, 26, 18);
     sun.target.position.set(0, 0, 6);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(PK.lowPower ? 1024 : 2048, PK.lowPower ? 1024 : 2048); // 휴대폰은 그림자 해상도를 낮춰 가볍게
     const sc = sun.shadow.camera;
     sc.left = -14; sc.right = 14; sc.top = 18; sc.bottom = -10; sc.near = 1; sc.far = 70;
     sun.shadow.bias = -0.0005;
@@ -295,80 +295,121 @@ diffuseColor.rgb *= 1.0 + fade * ((h1 - 0.5) * 0.22 + (h2 - 0.5) * 0.14);`);
     addStand(-31.5, -8.5, 11, Math.PI / 4, 14);
     addStand(31.5, -8.5, 11, -Math.PI / 4, 14);
 
-    // 관중 한 명 모양 (앉은 자세 기준, 발밑 = 좌석 높이): 몸통·다리 / 머리 / 왼팔 / 오른팔 을 part 값으로 구분
+    // 관중 한 명 모양 (앉은 자세 기준, 발밑 = 좌석 높이). part 값으로 부위를 구분해 셰이더에서 색·움직임을 나눔
+    //  0 상의(팀색) 1 머리·목(피부) 2 왼팔 3 오른팔 4 바지·다리 5 머리카락/모자 6 깃대 7 깃발 천
+    //  관중이 약 5천 명이라 한 명당 삼각형 180개 안팎으로 (휴대폰에서도 부드럽게)
     const fanGeo = (() => {
       const parts = [];
-      const piece = (geo, part, x, y, z) => { geo.translate(x, y, z); const g2 = geo.toNonIndexed(); const n = g2.attributes.position.count; g2.setAttribute('part', new THREE.Float32BufferAttribute(new Array(n).fill(part), 1)); parts.push(g2); };
-      // 관중이 수천 명이라 한 명당 삼각형 약 100개로 가볍게 (휴대폰에서도 부드럽게)
-      piece(new THREE.CylinderGeometry(0.15, 0.17, 0.48, 6, 1, true), 0, 0, 0.5, 0); // 몸통
-      piece(new THREE.BoxGeometry(0.3, 0.14, 0.4), 0, 0, 0.2, 0.12);                  // 허벅지(앉음)
-      piece(new THREE.SphereGeometry(0.105, 7, 5), 1, 0, 0.88, 0.01);                 // 머리
-      piece(new THREE.CylinderGeometry(0.045, 0.04, 0.42, 5, 1, true), 2, 0.2, 0.52, 0.02);   // 왼팔 (어깨 0.73 에서 아래로)
-      piece(new THREE.CylinderGeometry(0.045, 0.04, 0.42, 5, 1, true), 3, -0.2, 0.52, 0.02);  // 오른팔
-      piece(new THREE.CircleGeometry(0.15, 6).rotateX(-Math.PI / 2), 0, 0, 0.74, 0);   // 어깨 위 덮개
+      const piece = (geo, part, x, y, z) => {
+        geo.translate(x, y, z);
+        const g2 = geo.index ? geo.toNonIndexed() : geo; const n = g2.attributes.position.count;
+        g2.setAttribute('part', new THREE.Float32BufferAttribute(new Array(n).fill(part), 1));
+        if (!g2.attributes.uv) g2.setAttribute('uv', new THREE.Float32BufferAttribute(new Array(n * 2).fill(0), 2));
+        parts.push(g2);
+      };
+      // 휴대폰(PK.lowPower): 같은 모양을 더 적은 면으로 (목·정강이 생략) → 한 명당 삼각형 약 절반
+      const lo = !!PK.lowPower, SEG = lo ? 6 : 8, ARM = lo ? 4 : 6;
+      piece(new THREE.CylinderGeometry(0.175, 0.145, 0.48, SEG, 1, true).scale(1, 1, 0.68), 0, 0, 0.5, 0);   // 몸통: 어깨가 넓고 납작한 가슴
+      piece(new THREE.CircleGeometry(0.175, SEG).rotateX(-Math.PI / 2).scale(1, 1, 0.68), 0, 0, 0.74, 0);    // 어깨 위
+      piece(new THREE.BoxGeometry(0.3, 0.14, 0.42), 4, 0, 0.2, 0.12);                                      // 허벅지 (앉음)
+      if (!lo) piece(new THREE.BoxGeometry(0.26, 0.42, 0.12), 4, 0, -0.04, 0.3);                           // 정강이
+      if (!lo) piece(new THREE.CylinderGeometry(0.048, 0.052, 0.1, 6, 1, true), 1, 0, 0.79, 0.005);       // 목
+      piece(lo ? new THREE.SphereGeometry(0.1, 6, 4).scale(1, 1.12, 1) : new THREE.SphereGeometry(0.1, 8, 6).scale(1, 1.12, 1), 1, 0, 0.9, 0.01); // 머리
+      piece(new THREE.SphereGeometry(0.108, SEG, lo ? 2 : 3, 0, Math.PI * 2, 0, 1.5).scale(1, 1.1, 1).rotateX(-0.35), 5, 0, 0.915, -0.012); // 머리카락 / 모자
+      piece(new THREE.CylinderGeometry(0.046, 0.038, 0.42, ARM, 1, true), 2, 0.205, 0.52, 0.02);             // 왼팔 (어깨 0.73 에서 아래로)
+      piece(new THREE.CylinderGeometry(0.046, 0.038, 0.42, ARM, 1, true), 3, -0.205, 0.52, 0.02);            // 오른팔
+      piece(new THREE.CylinderGeometry(0.012, 0.012, 1.05, 4, 1, true), 6, -0.205, 0.31 - 0.52, 0.06);     // 깃대: 손에서 아래로 (팔을 들면 머리 위로 섬)
+      piece(new THREE.PlaneGeometry(0.52, 0.34, lo ? 2 : 4, 1), 7, -0.205 + 0.26, 0.31 - 0.88, 0.06);              // 깃발 천 (깃대 끝쪽)
       const merged = new THREE.BufferGeometry();
-      ['position', 'normal', 'part'].forEach((name) => {
-        const size = parts[0].attributes[name].itemSize; let total = 0; parts.forEach((p) => (total += p.attributes[name].array.length));
-        const arr = new Float32Array(total); let o = 0; parts.forEach((p) => { arr.set(p.attributes[name].array, o); o += p.attributes[name].array.length; });
+      ['position', 'normal', 'uv', 'part'].forEach((name) => {
+        const size = parts[0].attributes[name].itemSize; let total = 0; parts.forEach((q) => (total += q.attributes[name].array.length));
+        const arr = new Float32Array(total); let o = 0; parts.forEach((q) => { arr.set(q.attributes[name].array, o); o += q.attributes[name].array.length; });
         merged.setAttribute(name, new THREE.BufferAttribute(arr, size));
       });
       return merged;
     })();
     const N = seats.length;
-    const aPhase = new Float32Array(N), aTeam = new Float32Array(N), aSkin = new Float32Array(N);
-    fanGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(aPhase, 1));
-    fanGeo.setAttribute('aTeam', new THREE.InstancedBufferAttribute(aTeam, 1));
-    fanGeo.setAttribute('aSkin', new THREE.InstancedBufferAttribute(aSkin, 1));
-    const U = { uTime: { value: 0 }, uExcite: { value: 0 }, uCheer: { value: -1 } };
-    const crowdM = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+    const aPhase = new Float32Array(N), aTeam = new Float32Array(N), aSkin = new Float32Array(N), aHair = new Float32Array(N), aPants = new Float32Array(N), aFlag = new Float32Array(N);
+    [['aPhase', aPhase], ['aTeam', aTeam], ['aSkin', aSkin], ['aHair', aHair], ['aPants', aPants], ['aFlag', aFlag]]
+      .forEach(([n, a]) => fanGeo.setAttribute(n, new THREE.InstancedBufferAttribute(a, 1)));
+    const U = { uTime: { value: 0 }, uExcite: { value: 0 }, uCheer: { value: -1 }, uLook: { value: new THREE.Vector3(0, 0.5, 11) } };
+    const crowdM = new THREE.MeshLambertMaterial({ color: '#ffffff', side: THREE.DoubleSide });
     crowdM.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, U);
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', `#include <common>
-attribute float part; attribute float aPhase; attribute float aTeam; attribute float aSkin;
-uniform float uTime; uniform float uExcite; uniform float uCheer;
-varying float vPart; varying float vSkin;`)
+attribute float part; attribute float aPhase; attribute float aTeam; attribute float aSkin; attribute float aHair; attribute float aPants; attribute float aFlag;
+uniform float uTime; uniform float uExcite; uniform float uCheer; uniform vec3 uLook;
+varying float vPart; varying float vSkin; varying float vHair; varying float vPants; varying vec2 vFanUv;
+vec2 rot2(vec2 p, vec2 c, float a) { vec2 q = p - c; float cs = cos(a), sn = sin(a); return c + vec2(cs * q.x - sn * q.y, sn * q.x + cs * q.y); }`)
         .replace('#include <begin_vertex>', `
 vec3 transformed = vec3(position);
-vPart = part; vSkin = aSkin;
+vPart = part; vSkin = aSkin; vHair = aHair; vPants = aPants; vFanUv = uv;
+bool flagPart = part > 5.5;
+if (flagPart && aFlag < 0.5) transformed = vec3(-0.205, 0.31, 0.06); // 깃발 없는 사람: 깃대·천을 한 점으로 접음
 // 기쁨(+1) / 아쉬움(-1) / 중립(0.4): 응원 팀이면 일어나 팔을 들고 뛰고, 상대 팀이면 머리를 감쌈
 float mood = uCheer < -0.5 ? 0.0 : (abs(aTeam - uCheer) < 0.5 ? 1.0 : (aTeam > 1.5 ? 0.4 : -1.0));
 float ex = uExcite * (0.75 + 0.25 * fract(aPhase * 7.13));
 float joy = max(mood, 0.0) * ex, sad = max(-mood, 0.0) * ex;
 float hop = max(0.0, sin(uTime * (8.0 + fract(aPhase * 3.7) * 3.0) + aPhase * 6.2831)) * 0.22 * joy;
 float stand = 0.32 * clamp(joy * 1.6, 0.0, 1.0) + 0.12 * clamp(sad * 1.6, 0.0, 1.0);
-if (part > 1.5) {
-  float side = part > 2.5 ? -1.0 : 1.0;
+bool holder = aFlag > 0.5;
+if (part > 1.5 && part < 3.5 || flagPart) {
+  bool rightSide = part > 2.5;
+  float side = rightSide ? -1.0 : 1.0;
   float wave = 0.25 * sin(uTime * 9.0 + aPhase * 17.0);
   float ang = side * (joy * (2.7 + wave) + sad * 2.3); // 팔을 머리 위로 / 머리 쪽으로
-  vec2 pivot = vec2(side * 0.2, 0.73);
-  vec2 q = transformed.xy - pivot; float c = cos(ang), s = sin(ang);
-  transformed.xy = pivot + vec2(c * q.x - s * q.y, s * q.x + c * q.y);
-  transformed.z += sad * 0.12;
+  // 깃발 든 사람: 오른팔을 들어 깃발을 머리 위로 (기쁠수록 크게 흔듦)
+  if (holder && rightSide) ang = -(2.45 + (0.12 + joy * 0.35) * sin(uTime * (2.2 + joy * 5.0) + aPhase * 9.0));
+  if (part > 6.5) { // 깃발 천이 바람에 펄럭임 (깃대에서 멀수록 크게)
+    float far = clamp((transformed.x + 0.205) / 0.52, 0.0, 1.0);
+    transformed.z += sin(uTime * (5.0 + joy * 4.0) + far * 5.0 + aPhase * 12.0) * 0.07 * far;
+  }
+  transformed.xy = rot2(transformed.xy, vec2(side * 0.205, 0.73), ang);
+  transformed.z += sad * 0.12 * (flagPart ? 0.0 : 1.0);
 }
-if (part > 0.5 && part < 1.5) transformed.z += sad * 0.06 - joy * 0.02;
+// 머리: 공을 따라 고개를 돌림 (사람마다 조금씩 다르게)
+if ((part > 0.5 && part < 1.5) || (part > 4.5 && part < 5.5)) {
+  vec3 ip = instanceMatrix[3].xyz; vec3 fw = normalize(instanceMatrix[2].xyz);
+  vec3 d = uLook - ip;
+  float dy = atan(d.x, d.z) - atan(fw.x, fw.z);
+  dy = mod(dy + 3.14159, 6.28318) - 3.14159;
+  dy = clamp(dy, -1.1, 1.1) * (0.55 + 0.45 * fract(aPhase * 5.3));
+  if (transformed.y > 0.76) transformed.xz = rot2(transformed.xz, vec2(0.0, 0.01), -dy);
+  transformed.z += sad * 0.06 - joy * 0.02;
+}
 transformed.y += hop + stand;
 transformed.x += sin(uTime * 1.3 + aPhase * 20.0) * 0.012; // 가만히 있을 때도 살짝 움직임`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-varying float vPart; varying float vSkin;`)
+varying float vPart; varying float vSkin; varying float vHair; varying float vPants; varying vec2 vFanUv;`)
         .replace('#include <color_fragment>', `#include <color_fragment>
-// 머리(와 절반쯤의 팔)는 피부색
+vec3 shirt = diffuseColor.rgb;
 vec3 skin = mix(vec3(0.95, 0.76, 0.6), vec3(0.32, 0.2, 0.13), vSkin);
+// 머리·목은 피부색, 팔은 반소매(피부) 또는 긴소매(상의)
 if (vPart > 0.5 && vPart < 1.5) diffuseColor.rgb = skin * 0.85;
-if (vPart > 1.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;`);
+if (vPart > 1.5 && vPart < 3.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;
+// 바지: 청바지 / 검정 / 베이지 / 회색
+if (vPart > 3.5 && vPart < 4.5) diffuseColor.rgb = vPants < 0.45 ? vec3(0.07, 0.1, 0.18) : vPants < 0.72 ? vec3(0.035) : vPants < 0.86 ? vec3(0.28, 0.23, 0.15) : vec3(0.16);
+// 머리카락: 검정 / 갈색 / 금발 / 흰머리, 일부는 팀색 모자
+if (vPart > 4.5 && vPart < 5.5) diffuseColor.rgb = vHair > 0.86 ? shirt * 1.15 : vHair < 0.5 ? vec3(0.025, 0.02, 0.018) : vHair < 0.7 ? vec3(0.16, 0.09, 0.04) : vHair < 0.8 ? vec3(0.55, 0.42, 0.2) : vec3(0.45);
+// 깃대는 어둡게, 깃발은 팀색 줄무늬
+if (vPart > 5.5 && vPart < 6.5) diffuseColor.rgb = vec3(0.12);
+if (vPart > 6.5) diffuseColor.rgb = mix(min(shirt * 2.2, vec3(1.0)), vec3(0.85), step(0.5, fract(vFanUv.x * 3.0 + 0.25)));`);
     };
     const crowd = new THREE.InstancedMesh(fanGeo, crowdM, N);
     crowd.frustumCulled = false;
     const dummy = new THREE.Object3D();
     const color = new THREE.Color();
-    seats.forEach((s, i) => {
-      s.grp.updateMatrixWorld();
-      const p = new THREE.Vector3(s.x, s.y, s.z).applyMatrix4(s.grp.matrixWorld);
-      dummy.position.copy(p); dummy.rotation.set(0, s.grp.rotation.y + (Math.random() - 0.5) * 0.3, 0);
-      const sc = 0.92 + Math.random() * 0.16; dummy.scale.set(sc, sc, sc);
+    seats.forEach((st0, i) => {
+      st0.grp.updateMatrixWorld();
+      const pw = new THREE.Vector3(st0.x, st0.y, st0.z).applyMatrix4(st0.grp.matrixWorld);
+      dummy.position.copy(pw); dummy.rotation.set(0, st0.grp.rotation.y + (Math.random() - 0.5) * 0.3, 0);
+      const sc = 0.92 + Math.random() * 0.16; dummy.scale.set(sc * (0.9 + Math.random() * 0.22), sc, sc); // 체격도 조금씩 다르게
       dummy.updateMatrix(); crowd.setMatrixAt(i, dummy.matrix);
       aPhase[i] = Math.random(); aSkin[i] = Math.random() * Math.random();
+      aHair[i] = Math.random(); aPants[i] = Math.random();
+      aFlag[i] = Math.random() < 0.035 ? 1 : 0; // 몇몇은 팀 깃발을 듦
       crowd.setColorAt(i, color.set('#888'));
     });
     scene.add(crowd);
@@ -393,6 +434,7 @@ if (vPart > 1.5 && fract(vSkin * 13.0) < 0.5) diffuseColor.rgb = skin * 0.8;`);
       },
       update(t) {
         U.uTime.value = t;
+        if (this.look) U.uLook.value.copy(this.look); // 관중이 공을 따라 고개를 돌림
         // 흥분은 천천히 가라앉음
         this._ex = this._ex === undefined ? 0 : this._ex + (this.excite - this._ex) * Math.min(1, (this._dt || 0.016) * 4);
         U.uExcite.value = this._ex; U.uCheer.value = this.cheer;

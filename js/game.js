@@ -163,6 +163,18 @@ PK.Game = (function () {
   function init(r, sc, cam, stadium) {
     addEventListener('pagehide', () => { if (onlineInProgress()) recordForfeit(false); }); // 온라인 경기 중 창을 닫아도 몰수패
     renderer = r; scene = sc; camera = cam; S = stadium;
+    // 화면 위쪽 배치: [몇 번째 키커 · 1P 키커/골키퍼] [점수판] 한 줄, 그 아래 킥 전적 카드
+    (function arrangeHudTop() {
+      const hud = $('hud'), sb = hud && hud.querySelector('.scoreboard');
+      if (!sb || hud.querySelector('.hud-top')) return;
+      const row = document.createElement('div'); row.className = 'hud-top';
+      const tags = document.createElement('div'); tags.className = 'hud-tags';
+      hud.insertBefore(row, sb);
+      tags.append($('round-label'), $('role-banner'));
+      const pad = document.createElement('div'); pad.className = 'hud-pad';
+      row.append(tags, sb, pad);
+      hud.insertBefore($('shot-mini'), row.nextSibling);
+    })();
     // 선수 동작(섞기·재생)도 경기 시계로: 실제 시간으로 돌면 프레임이 끊길 때 동작 섞기와 몸 이동 속도가 어긋나 다이빙이 들쭉날쭉했음
     if (PK.PlayerModel) PK.PlayerModel.clock = () => (st.active ? st.time : performance.now() / 1000);
     S.aim.visible = false; S.traj.visible = false;
@@ -2366,7 +2378,7 @@ PK.Game = (function () {
   // 그물·관중·날씨·광고·카메라 (리플레이 중에도 계속)
   function envUpdate(dt) {
     S.net.update(dt);
-    S.crowd._dt = dt; S.crowd.update(st.time);
+    S.crowd._dt = dt; S.crowd.look = S.ball.position; S.crowd.update(st.time);
     if (S.updateWeather) S.updateWeather(dt); // 비·눈
     S.adTex.offset.x = (st.time * 0.03) % 1;
     if (S.leds) S.leds.forEach((t) => { t.offset.x = (-st.time * 0.05) % 1; }); // 관중석 앞 LED 광고가 흘러감
