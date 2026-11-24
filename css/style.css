@@ -224,7 +224,8 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 /* 동전 / 넘기기 / 결과 */
 .coin-box, .handoff-box, .result-box { background: rgba(6, 16, 11, .92); border: 1px solid var(--line); border-radius: 18px;
   padding: 28px 40px; text-align: center; min-width: 340px; }
-#coin { background: transparent; align-items: flex-end; padding-bottom: 8vh; }
+#coin { background: transparent; align-items: flex-end; padding-bottom: 8vh; pointer-events: none; } /* 투명한 동전 화면이 오른쪽 위 ✕(로비로) 버튼을 덮어 누를 수 없던 문제: 상자 밖 클릭은 아래로 통과 */
+#coin .coin-box { pointer-events: auto; }
 .coin-box h2, .handoff-box h2, .result-box h2 { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-size: 34px; margin-bottom: 8px; }
 .coin-box p, .handoff-box p { color: var(--muted); margin-bottom: 16px; font-size: 15px; }
 .coin-choices, .result-btns { display: flex; gap: 12px; justify-content: center; }

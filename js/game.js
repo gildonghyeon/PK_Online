@@ -161,6 +161,7 @@ PK.Game = (function () {
 
   // ---------- 초기화 ----------
   function init(r, sc, cam, stadium) {
+    addEventListener('pagehide', () => { if (onlineInProgress()) recordForfeit(false); }); // 온라인 경기 중 창을 닫아도 몰수패
     renderer = r; scene = sc; camera = cam; S = stadium;
     // 선수 동작(섞기·재생)도 경기 시계로: 실제 시간으로 돌면 프레임이 끊길 때 동작 섞기와 몸 이동 속도가 어긋나 다이빙이 들쭉날쭉했음
     if (PK.PlayerModel) PK.PlayerModel.clock = () => (st.active ? st.time : performance.now() / 1000);
@@ -253,6 +254,7 @@ PK.Game = (function () {
     st.shotLog = [];
     st.final = null;
     st.tour = (opts && opts.tour) || null;
+    st.forfeitDone = false; st.oppGone = false;
     st.practice = mode === 'practice' ? ((opts && opts.practice) || 'kick') : null; // 연습 모드: 'kick' 키커만 / 'keep' 키퍼만
     PK.AI.reset();
     if (st.tour) PK.AI.setProfile(st.tour.opp.profile); else PK.AI.clearProfile();
@@ -336,6 +338,7 @@ PK.Game = (function () {
   }
 
   function quit() {
+    if (onlineInProgress()) recordForfeit(false); // 온라인 경기 중에 나가면 몰수패
     if (online()) PK.Online.leave();
     cleanup();
     st.final = null;
@@ -2179,6 +2182,7 @@ PK.Game = (function () {
     // 온라인: 다시 하기는 방장만 (참가자는 방장을 기다림)
     $('btn-again').hidden = online() && !PK.Online.isHost;
     $('result-wait').hidden = !(online() && !PK.Online.isHost);
+    setText('result-wait', '방장이 다시 시작하면 바로 이어서 시작돼요');
     setText('result-title', title);
     setText('result-score', `${goals(0)} : ${goals(1)}`);
     renderShotMap();
@@ -2465,15 +2469,46 @@ PK.Game = (function () {
   // 온라인 상대가 나갔을 때
   function opponentLeft() {
     if (!st.active || !online()) return;
+    const forfeit = onlineInProgress(); // 경기 도중이면 나간 쪽 몰수패 = 나는 몰수승
     st.oppGone = true;
     st.timers = [];
+    if (st.state === 'replay') showReplayBadge(false);
     hideKickUI();
+    show('coin', false); show('handoff', false);
     setText('role-banner', ''); setText('instruction', '');
-    setText('result-title', '상대가 나갔어요');
+    $('result-text').className = 'result-text';
+    if (forfeit) {
+      recordForfeit(true);
+      setText('result-title', '몰수승! 🏆');
+      setText('result-wait', '상대가 경기 중에 나가서 몰수패 처리됐어요');
+      $('result-wait').hidden = false;
+      PK.Audio.cheer();
+      const m = [0, 1].find((t) => isLocal(t));
+      if (m !== undefined) { S.crowd.cheer = m; S.crowd.excite = 1; }
+    } else {
+      setText('result-title', '상대가 나갔어요');
+      $('result-wait').hidden = true;
+    }
     setText('result-score', `${goals(0)} : ${goals(1)}`);
-    $('btn-again').hidden = true; $('result-wait').hidden = true;
+    renderShotMap();
+    $('btn-again').hidden = true;
     show('result', true);
     st.state = 'end';
+  }
+  // 온라인 경기가 아직 끝나지 않았는지 (결과가 난 뒤 나가는 것은 몰수가 아님)
+  function onlineInProgress() { return !!(st.active && online() && !st.oppGone && st.state !== 'end' && !st.forfeitDone && st.kicks && checkEnd() < 0); }
+  // 몰수 기록: 나간 쪽은 패, 남은 쪽은 승 (내 기록·최근 경기에 '몰수'로 표시)
+  function recordForfeit(win) {
+    if (st.forfeitDone || !PK.Stats) return;
+    st.forfeitDone = true;
+    const m = [0, 1].find((t) => isLocal(t));
+    if (m === undefined) return;
+    const o = 1 - m;
+    PK.Stats.record({
+      mode: 'online', stage: '', win, forfeit: true, my: goals(m), opp: goals(o), sudden: st.kicks[0].length > 5,
+      myName: st.teams[m].name, oppName: st.teams[o].name,
+      log: (st.shotLog || []).map((k) => ({ team: k.team === m ? 0 : 1, n: k.n, x: +k.x.toFixed(2), y: +k.y.toFixed(2), cls: k.cls, text: k.text, type: k.type })),
+    });
   }
 
   return { init, start, update, quit, opponentLeft, shotCard, get active() { return st.active; }, _st: st, _shotMap: renderShotMap, _test: { planDive, keeperPose, keeperCapsules, scene: () => scene } };

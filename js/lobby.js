@@ -221,7 +221,7 @@ PK.Lobby = (function () {
     const head = document.createElement('div');
     head.className = 'last-head';
     head.innerHTML = `<span class="last-badge ${L.win ? 'win' : 'lose'}">${L.win ? '승' : '패'}</span><b class="last-score">${L.my} : ${L.opp}</b>` +
-      `<span class="last-meta">vs ${esc(L.oppName)}<br>${MODE_NAME[L.mode] || ''}${L.stage ? ' ' + esc(L.stage) : ''}${L.sudden ? ' · 서든데스' : ''} · ${whenText(L.at)}</span>`;
+      `<span class="last-meta">vs ${esc(L.oppName)}<br>${MODE_NAME[L.mode] || ''}${L.stage ? ' ' + esc(L.stage) : ''}${L.sudden ? ' · 서든데스' : ''}${L.forfeit ? (L.win ? ' · 상대 몰수' : ' · 몰수패') : ''} · ${whenText(L.at)}</span>`;
     lb.appendChild(head);
     const log = L.log || [];
     if (PK.Game && PK.Game.shotCard && log.some((k) => k.team === 0)) {
