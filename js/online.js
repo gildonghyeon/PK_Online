@@ -71,6 +71,95 @@ PK.Online = (function () {
     };
   }
 
+  // ---------- Claude 밖(GitHub Pages 등): 두 기기를 WebRTC 로 직접 연결 ----------
+  //  방 코드로 서로를 찾는 일만 무료 PeerJS 중계 서버가 하고, 경기 신호는 두 기기 사이로 직접 오감.
+  //  실시간 방(room)과 같은 모양(presence/peers/onPeers)이라 위쪽 경기 로직은 그대로 씀.
+  const PEER_LIB = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
+  const PEER_PREFIX = 'pkonline-v1-';
+  let peerLib = null;
+  function loadPeerLib() {
+    if (window.Peer) return Promise.resolve(window.Peer);
+    if (!peerLib) peerLib = new Promise((res, rej) => {
+      const sc = document.createElement('script'); sc.src = PEER_LIB; sc.async = true;
+      sc.onload = () => (window.Peer ? res(window.Peer) : rej(new Error('peer_lib')));
+      sc.onerror = () => { peerLib = null; rej(new Error('peer_lib')); };
+      document.head.appendChild(sc);
+    });
+    return peerLib;
+  }
+  function peerRoom() {
+    const id = Math.random().toString(36).slice(2, 10); // 게임 안에서 나를 가리키는 이름 (PeerJS 아이디와 별개)
+    let my = {}; const others = new Map(); const conns = new Map(); let handlers = []; let connHs = []; let snap = [];
+    let peer = null, peerKey = '', retry = null, online = false;
+    const P = (pid, pres, me) => ({ peer: pid, by: null, isMe: me, sameTab: me, kind: 'viewer', guest: false, presence: pres, updatedAt: Date.now() });
+    const build = () => { snap = Object.freeze([P(id, Object.freeze(Object.assign({}, my)), true), ...[...others].map(([k, pr]) => P(k, pr, false))]); };
+    const fire = () => { build(); handlers.forEach((h) => { try { h({ peers: snap, joined: [], left: [], updated: [] }); } catch (e) { console.warn(e); } }); };
+    const setOnline = (v) => { if (online === v) return; online = v; connHs.forEach((h) => h(v)); };
+    const send = (c) => { try { if (c.open) c.send({ t: 'p', id, p: my }); } catch (e) { /* 끊긴 연결 */ } };
+    function attach(c) {
+      c.on('open', () => { conns.set(c.peer, c); send(c); setOnline(true); });
+      c.on('data', (m) => { if (m && m.t === 'p' && typeof m.id === 'string' && m.p && typeof m.p === 'object') { c._gid = m.id; others.set(m.id, Object.freeze(m.p)); fire(); } });
+      const gone = () => { conns.delete(c.peer); if (c._gid) { others.delete(c._gid); fire(); } };
+      c.on('close', gone); c.on('error', gone);
+    }
+    function closeAll() {
+      clearTimeout(retry); retry = null;
+      conns.forEach((c) => { try { c.close(); } catch (e) { /* 무시 */ } });
+      conns.clear(); others.clear();
+      if (peer) { try { peer.destroy(); } catch (e) { /* 무시 */ } }
+      peer = null; peerKey = ''; setOnline(false); fire();
+    }
+    // 방장은 '방 코드' 이름으로 기다리고, 참가자는 그 이름으로 찾아감 (아직 없으면 몇 초마다 다시)
+    async function ensure() {
+      const key = my.code && my.role ? my.role + ':' + my.code : '';
+      if (key === peerKey) return;
+      closeAll();
+      peerKey = key;
+      if (!key) return;
+      let Peer;
+      try { Peer = await loadPeerLib(); } catch (e) { roomErr = 'peer_lib'; render(); return; }
+      if (peerKey !== key) return;
+      const host = my.role === 'host', target = PEER_PREFIX + my.code;
+      const pr = host ? new Peer(target) : new Peer();
+      peer = pr;
+      pr.on('open', () => {
+        if (peer !== pr) return;
+        roomErr = null; setOnline(true); render();
+        if (!host) {
+          let pending = null;
+          const tryJoin = () => {
+            if (peer !== pr || conns.size) return;
+            if (pending && !pending.open) { try { pending.close(); } catch (e) { /* 무시 */ } } // 대답 없던 지난 시도는 정리
+            pending = pr.connect(target, { reliable: true });
+            attach(pending);
+            retry = setTimeout(tryJoin, 4000);
+          };
+          tryJoin();
+        }
+      });
+      pr.on('connection', (c) => { if (peer === pr) attach(c); });
+      pr.on('disconnected', () => { if (peer === pr) { try { pr.reconnect(); } catch (e) { /* 무시 */ } } });
+      pr.on('error', (e) => {
+        if (peer !== pr) return;
+        const t = e && e.type;
+        if (t === 'peer-unavailable') return; // 방장이 아직 없음: 계속 다시 찾음
+        if (t === 'unavailable-id' && host) { roomErr = 'code_taken'; render(); create(); return; } // 같은 코드가 이미 쓰이는 중: 새 코드로
+        roomErr = t || 'error'; render();
+      });
+    }
+    return {
+      presence(patch) {
+        for (const k in patch) { if (patch[k] === null) delete my[k]; else my[k] = JSON.parse(JSON.stringify(patch[k])); }
+        build(); conns.forEach(send); ensure(); return Promise.resolve();
+      },
+      peers() { return snap; },
+      onPeers(h) { handlers.push(h); setTimeout(fire, 0); return () => { handlers = handlers.filter((x) => x !== h); }; },
+      connected() { return online; },
+      onConnection(h) { connHs.push(h); return () => { connHs = connHs.filter((x) => x !== h); }; },
+      direct: true,
+    };
+  }
+
   // ---------- 시작 ----------
   async function init() {
     const use = (n) => { try { return window.claude && typeof window.claude.use === 'function' ? window.claude.use(n).catch(() => null) : Promise.resolve(null); } catch (e) { return Promise.resolve(null); } };
@@ -78,6 +167,8 @@ PK.Online = (function () {
     room = r; db = d;
     if (!room && /[?&]fakeroom=1/.test(location.search) && 'BroadcastChannel' in window) room = fakeRoom();
     if (!db && /[?&]fakedb=1/.test(location.search) && 'BroadcastChannel' in window) db = fakeDb();
+    // Claude 밖에서 열었을 때(GitHub Pages 등): 두 기기 직접 연결로 온라인 대전
+    if (!room && !db && !window.claude && 'RTCPeerConnection' in window) room = peerRoom();
     ready = true;
     if (room) {
       const onErr = (e) => { roomErr = (e && e.code) || 'error'; render(); };
@@ -297,6 +388,11 @@ PK.Online = (function () {
     revoked: '접근 권한이 바뀌어 연결이 끊겼어요. 페이지를 새로고침해 주세요',
     capability_disabled: '이 기능이 꺼져 있어요',
     resource_exhausted: '신호가 너무 잦아요. 잠시 뒤 다시 시도해 주세요',
+    peer_lib: '연결 도구를 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요',
+    code_taken: '같은 코드의 방이 이미 있어 새 코드로 바꿨어요',
+    network: '중계 서버에 연결하지 못했어요. 인터넷 연결을 확인해 주세요',
+    'server-error': '중계 서버가 응답하지 않아요. 잠시 뒤 다시 시도해 주세요',
+    'browser-incompatible': '이 브라우저는 직접 연결을 지원하지 않아요',
     invalid_argument: '이 계정은 보기 권한이라 방을 만들거나 참가할 수 없어요. 방장이 공유 메뉴에서 이 계정을 "편집자"로 바꾸고, "링크가 있는 모든 사용자" 공유는 꺼야 해요. 바꾼 뒤 새로고침해 주세요',
   };
   const validCode = (c) => typeof c === 'string' && /^[A-Z0-9]{4}$/.test(c);
@@ -314,13 +410,14 @@ PK.Online = (function () {
     const lines = [];
     if (room) {
       const others = peersList().filter((p) => !p.sameTab);
-      lines.push(`실시간 방: ${conn || (room.connected && room.connected()) ? '연결됨' : '연결 중…'} · 이 게임을 열어 둔 다른 사람 ${others.length}명`);
+      if (room.direct) lines.push(`직접 연결: ${!code ? '방을 만들거나 코드를 입력하세요' : room.connected() ? (others.length ? '상대와 연결됨' : '중계 서버 연결됨 · 상대를 기다리는 중') : '중계 서버에 연결하는 중…'}`);
+      else lines.push(`실시간 방: ${conn || (room.connected && room.connected()) ? '연결됨' : '연결 중…'} · 이 게임을 열어 둔 다른 사람 ${others.length}명`);
     }
     if (db) {
       lines.push(`공유 저장소: ${dbWritable === false ? '쓰기 권한 없음 (게임 편집자로 초대받아야 해요)' : dbWritable ? '사용 중' : '사용 가능'}`);
     }
-    if (role === 'guest' || !code) { const o = openRooms(); lines.push(`지금 열려 있는 방: ${o.length ? o.join(', ') : '없음'}`); }
-    if (matched) lines.push(`연결 경로: ${via === 'db' ? '공유 저장소' : '실시간 방'}`);
+    if ((role === 'guest' || !code) && !(room && room.direct)) { const o = openRooms(); lines.push(`지금 열려 있는 방: ${o.length ? o.join(', ') : '없음'}`); }
+    if (matched) lines.push(`연결 경로: ${via === 'db' ? '공유 저장소' : room && room.direct ? '직접 연결' : '실시간 방'}`);
     if (roomErr) lines.push(`실시간 방 오류: ${ERR_TEXT[roomErr] || roomErr}`);
     if (dbErr) lines.push(`저장소 오류: ${ERR_TEXT[dbErr] || dbErr}`);
     el.textContent = lines.join('\n');
