@@ -18,6 +18,14 @@
     <div class="lobby-left">
       <h1 class="logo">PK<span>ONLINE</span></h1>
       <p class="tagline">11미터의 승부, 단 한 번의 킥</p>
+      <div class="account" id="account" hidden>
+        <button type="button" class="acc-login" id="acc-login">로그인</button>
+        <div class="acc-user" id="acc-user" hidden>
+          <span class="acc-prov" id="acc-prov"></span><b class="acc-nick" id="acc-nick"></b>
+          <button type="button" id="acc-edit">닉네임 변경</button>
+          <button type="button" id="acc-logout">로그아웃</button>
+        </div>
+      </div>
 
       <div class="menu">
         <button class="menu-btn" data-mode="single">
@@ -34,18 +42,6 @@
           <span class="menu-title">토너먼트</span>
           <span class="menu-sub" id="tour-menu-sub">8팀 녹아웃 · 8강부터 우승까지</span>
         </button>
-        <button class="menu-btn" data-mode="multi">
-          <span class="menu-title">멀티 플레이</span>
-          <span class="menu-sub">한 화면에서 친구와 번갈아 대결</span>
-        </button>
-        <button class="menu-btn" data-mode="practice">
-          <span class="menu-title">연습 모드</span>
-          <span class="menu-sub">키커나 키퍼 하나만 골라 끝없이 연습</span>
-        </button>
-        <div class="practice-panel" id="practice-panel" hidden>
-          <button data-practice="kick"><b>⚽ 키커 연습</b><span>AI 키퍼를 상대로 슛만</span></button>
-          <button data-practice="keep"><b>🧤 키퍼 연습</b><span>AI 키커의 슛을 막기만</span></button>
-        </div>
         <button class="menu-btn" data-mode="online">
           <span class="menu-title">온라인 대전</span>
           <span class="menu-sub">방 코드로 다른 기기의 친구와 대결 (1P 선수로 출전)</span>
@@ -69,6 +65,18 @@
           <div class="op-rooms" id="op-rooms" hidden></div>
           <p class="op-diag" id="op-diag"></p>
         </div>
+        <button class="menu-btn" data-mode="practice">
+          <span class="menu-title">연습 모드</span>
+          <span class="menu-sub">키커나 키퍼 하나만 골라 끝없이 연습</span>
+        </button>
+        <div class="practice-panel" id="practice-panel" hidden>
+          <button data-practice="kick"><b>⚽ 키커 연습</b><span>AI 키퍼를 상대로 슛만</span></button>
+          <button data-practice="keep"><b>🧤 키퍼 연습</b><span>AI 키커의 슛을 막기만</span></button>
+        </div>
+        <button class="menu-btn" data-mode="multi">
+          <span class="menu-title">멀티 플레이</span>
+          <span class="menu-sub">한 화면에서 친구와 번갈아 대결</span>
+        </button>
       </div>
 
       <div class="env-box" id="env-box">
@@ -236,6 +244,26 @@
     </div>
   </section>
 
+  <!-- 로그인 · 닉네임 -->
+  <section class="acc-modal" id="acc-modal" hidden>
+    <div class="acc-box">
+      <div id="acc-login-pane">
+        <h2>로그인</h2>
+        <p class="acc-desc">로그인하면 닉네임을 정해 온라인 대전에서 상대에게 보여 줄 수 있어요.</p>
+        <button type="button" class="acc-prov-btn google" data-provider="google"><span class="acc-ico" aria-hidden="true">G</span>구글로 로그인</button>
+        <button type="button" class="acc-prov-btn kakao" data-provider="kakao"><span class="acc-ico" aria-hidden="true">●</span>카카오로 로그인</button>
+        <button type="button" class="acc-cancel" id="acc-close">닫기</button>
+      </div>
+      <form id="acc-nick-pane" hidden>
+        <h2 id="acc-nick-title">닉네임</h2>
+        <p class="acc-desc">2~12자 · 한글, 영문, 숫자, _</p>
+        <input id="acc-nick-input" maxlength="12" autocomplete="off" spellcheck="false" aria-label="닉네임" />
+        <div class="acc-row"><button type="submit" class="acc-save">저장</button><button type="button" class="acc-cancel" id="acc-nick-cancel">취소</button></div>
+      </form>
+      <p class="acc-status" id="acc-status" aria-live="polite"></p>
+    </div>
+  </section>
+
   <div id="loading">경기장 준비 중...</div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -247,6 +275,8 @@
   <script src="js/stadium.js"></script>
   <script src="js/physics.js"></script>
   <script src="js/ai.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/lobby.js"></script>
   <script src="js/online.js"></script>
   <script src="js/game.js"></script>

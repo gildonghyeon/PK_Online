@@ -103,10 +103,10 @@ PK.Audio = (function () {
   // ---------- 함성·탄식 미리 만들기 ----------
   // 실시간으로 목소리 수십 개를 동시에 만들면 기기에 따라 소리가 끊기며 '지직' 깨짐 → 오프라인으로 한 번 그려 버퍼로 재생
   const CROWD = {
-    cheer: { sec: 4.8, voices: { n: 34, f0: [150, 340], glide: 1.3, glideEnd: 1.05, attack: 0.18, hold: 1.1, release: 2.2, vol: 1.6,
-      formants: [[750, 5, 1], [1200, 6, 0.55], [2500, 7, 0.18]], vowelTo: 0.82, breath: 0.3 }, clap: [3.2, 0.6, 0.35] },
-    groan: { sec: 3.6, voices: { n: 26, f0: [130, 260], glide: 0.78, glideEnd: 0.7, attack: 0.25, hold: 0.55, release: 1.5, vol: 1.15,
-      formants: [[500, 5, 1], [880, 6, 0.5], [2300, 7, 0.1]], breath: 0.22, lp: 2000 }, clap: [1.6, 0.18, 0.6] },
+    cheer: { sec: 4.8, voices: { n: 70, f0: [140, 360], glide: 1.3, glideEnd: 1.05, attack: 0.18, hold: 1.1, release: 2.2, vol: 1.6,
+      formants: [[750, 4, 1], [1200, 5, 0.55], [2500, 6, 0.18]], vowelTo: 0.82, breath: 0.95 }, clap: [3.2, 0.6, 0.35] },
+    groan: { sec: 3.6, voices: { n: 50, f0: [120, 270], glide: 0.78, glideEnd: 0.7, attack: 0.25, hold: 0.55, release: 1.5, vol: 1.15,
+      formants: [[500, 4, 1], [880, 5, 0.5], [2300, 6, 0.1]], breath: 0.65, lp: 2000 }, clap: [1.6, 0.18, 0.6] },
   };
   const ready = { cheer: [], groan: [] };
 
@@ -135,6 +135,11 @@ PK.Audio = (function () {
       const vib = c.createOscillator(); vib.frequency.value = 4 + Math.random() * 3; // 떨림
       const vg = c.createGain(); vg.gain.value = f0 * 0.012;
       vib.connect(vg); vg.connect(osc.frequency);
+      // 사람 목소리처럼 음높이가 불규칙하게 거칠게 흔들림 (매끈한 합성음 → '오르간·합창' 같은 소리 방지)
+      const jit = c.createBufferSource(); jit.buffer = brown; jit.loop = true;
+      const jg = c.createGain(); jg.gain.value = f0 * (0.05 + Math.random() * 0.04);
+      jit.connect(jg); jg.connect(osc.frequency);
+      jit.start(st, Math.random() * 3); jit.stop(end + 0.05);
       const g = c.createGain();
       const peak = 1 / o.n * (0.6 + Math.random() * 0.8);
       g.gain.setValueAtTime(0.0001, st);

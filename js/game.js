@@ -288,20 +288,22 @@ PK.Game = (function () {
     const cfg2 = Object.assign({}, p2, { uniform: p2.uniformShown !== undefined ? p2.uniformShown : p2.uniform });
     delete cfg2.uniformShown;
     st.teams = [
-      { name: '1P', cfg: Object.assign({}, p1), human: true },
+      { name: (mode !== 'multi' && PK.Auth && PK.Auth.nickname()) || '1P', cfg: Object.assign({}, p1), human: true }, // 로그인했으면 닉네임
       { name: mode === 'multi' ? '2P' : st.tour ? st.tour.opp.name : 'AI', cfg: cfg2, human: mode === 'multi' },
     ];
     if (mode === 'online') {
       // 0번 팀 = 방장(호스트), 1번 팀 = 참가자. 내 선수는 1P 꾸미기, 상대는 상대가 보낸 꾸미기
       const net = PK.Online;
+      // 이름: 로그인한 닉네임 (없으면 나 / 상대)
+      const myName = (PK.Auth && PK.Auth.nickname()) || '나', oppName = net.opponentName() || '상대';
       const mine = Object.assign({}, p1);
       const opp = net.opponentCfg() || PK.Avatar.randomConfig(mine.uniform);
       const hostCfg = net.isHost ? mine : opp;
       let guestCfg = net.isHost ? opp : mine;
       if (guestCfg.uniform === hostCfg.uniform) guestCfg = Object.assign({}, guestCfg, { uniform: (guestCfg.uniform + 1) % PK.Options.uniform.length });
       st.teams = [
-        { name: net.isHost ? '나' : '상대', cfg: hostCfg, human: true, remote: !net.isHost },
-        { name: net.isHost ? '상대' : '나', cfg: guestCfg, human: true, remote: net.isHost },
+        { name: net.isHost ? myName : oppName, cfg: hostCfg, human: true, remote: !net.isHost },
+        { name: net.isHost ? oppName : myName, cfg: guestCfg, human: true, remote: net.isHost },
       ];
       st.gid = net.gid;
       st.oppGone = false;
@@ -2223,7 +2225,11 @@ PK.Game = (function () {
     // 승부를 가른 순간: 이긴 쪽(넣은 키커 또는 막은 키퍼)이 포효하고, 카메라가 그 얼굴을 클로즈업 → 잠시 뒤 결과 화면
     const kickerWon = st.kickerTeam === w;
     const hero = kickerWon ? st.Kk.av : st.K.av, loser = kickerWon ? st.K.av : st.Kk.av;
-    [hero, loser].forEach((a) => { a.scale.set(1, 1, 1); a.rotation.z = 0; a.position.y = 0; a.userData.postAnim = null; });
+    [hero, loser].forEach((a) => {
+      // 서 있는 방향(y 회전)만 남기고 기울기·뒤집힘은 모두 풀기
+      const yaw = Math.atan2(2 * (a.quaternion.w * a.quaternion.y + a.quaternion.x * a.quaternion.z), 1 - 2 * (a.quaternion.y * a.quaternion.y + a.quaternion.x * a.quaternion.x));
+      a.scale.set(1, 1, 1); a.rotation.set(0, yaw, 0); a.position.y = 0; a.userData.postAnim = null;
+    });
     if (hero.userData.setShout) hero.userData.setShout(true);
     st.final = { t0: st.time, hero, loser, d0: 1.7 };
     st.Kk = null; st.K = null;
@@ -2444,7 +2450,9 @@ PK.Game = (function () {
     R.to = R.frames[R.frames.length - 1].t;
     R.t = R.from; R.fi = 0; R.netI = 0; R.done2 = done;
     // 처음 자리 기억 (리플레이 뒤 되돌림)
-    R.saved = R.avs.map(({ av }) => ({ p: av.position.clone(), q: av.quaternion.clone(), s: av.scale.clone(), v: av.visible }));
+    // 회전은 각도(오일러) 그대로 기억: 쿼터니언으로 되돌리면 뒤를 본 키커(약 180°)가 '뒤집힘+반 바퀴'로 풀려,
+    //  이어서 rotation.z 만 0으로 바꾸는 세리머니에서 거꾸로 땅에 박혔음
+    R.saved = R.avs.map(({ av }) => ({ p: av.position.clone(), r: av.rotation.clone(), s: av.scale.clone(), v: av.visible }));
     R.savedBall = S.ball.position.clone();
     while (R.netI < R.net.length && R.net[R.netI].t < R.from) R.netI++;
     // 카메라: 키커 뒤 대각선(공이 간 쪽)에서 키커·공·골대·키퍼를 한 화면에 담고, 공이 날아가면 골대 쪽으로 다가감
@@ -2479,7 +2487,7 @@ PK.Game = (function () {
     const R = st.rec;
     if (!R || st.state !== 'replay') return;
     showReplayBadge(false);
-    R.avs.forEach(({ av }, k) => { const sv = R.saved[k]; av.position.copy(sv.p); av.quaternion.copy(sv.q); av.scale.copy(sv.s); av.visible = sv.v; });
+    R.avs.forEach(({ av }, k) => { const sv = R.saved[k]; av.position.copy(sv.p); av.rotation.copy(sv.r); av.scale.copy(sv.s); av.visible = sv.v; });
     S.ball.position.copy(R.savedBall);
     st.state = 'busy';
     const done = R.done2; R.done2 = null;

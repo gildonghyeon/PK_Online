@@ -316,7 +316,8 @@ PK.Online = (function () {
     render();
   }
 
-  function myCfg() { return PK.Lobby.profile(0); }
+  // 내 선수 꾸미기 + 닉네임(로그인했으면)을 상대에게 보냄
+  function myCfg() { const c = Object.assign({}, PK.Lobby.profile(0)); const n = PK.Auth && PK.Auth.nickname(); if (n) c.name = n; return c; }
 
   // 새로고침(게임 업데이트 포함)돼도 방을 이어가도록 이 탭에만 기억
   function remember(v) { try { if (v) sessionStorage.setItem('pk_online', JSON.stringify(v)); else sessionStorage.removeItem('pk_online'); } catch (e) { /* 무시 */ } }
@@ -459,5 +460,7 @@ PK.Online = (function () {
     get via() { return via; },
     get gid() { return currentGid(); },
     opponentCfg() { const r = remote(); return r ? sanitizeCfg(r.cfg) : null; },
+    // 상대 닉네임 (받은 값은 믿지 않고 글자·길이 검사)
+    opponentName() { const r = remote(); const n = r && r.cfg && r.cfg.name; return typeof n === 'string' && /^[0-9A-Za-z가-힣_]{2,12}$/.test(n) ? n : null; },
   };
 })();

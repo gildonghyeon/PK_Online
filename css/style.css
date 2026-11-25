@@ -50,6 +50,35 @@ button { font-family: inherit; cursor: pointer; border: none; color: inherit; }
 .difficulty { display: flex; gap: 8px; align-items: center; padding-left: 8px; color: var(--muted); font-size: 14px; }
 .difficulty button { padding: 6px 14px; border-radius: 20px; background: rgba(255,255,255,.07); font-size: 13px; }
 .difficulty button.on { background: var(--accent); color: #102; font-weight: 700; }
+/* 로그인 · 닉네임 (로비 왼쪽 위) */
+.account { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -8px; }
+.acc-login { padding: 8px 18px; border-radius: 20px; background: var(--accent); color: #102; font-weight: 900; font-size: 14px; }
+.acc-user { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 14px; }
+.acc-prov { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 1px 7px; }
+.acc-prov:empty { display: none; }
+.acc-nick { font-size: 17px; color: var(--accent); }
+.acc-user button { padding: 5px 12px; border-radius: 16px; background: rgba(255,255,255,.08); font-size: 12px; }
+.acc-user button:hover { background: rgba(255,255,255,.16); }
+.acc-modal { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.6);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.acc-modal[hidden] { display: none; }
+.acc-box { width: min(380px, 100%); background: rgba(6, 16, 11, .97); border: 1px solid var(--line); border-radius: 16px; padding: 24px 22px; display: flex; flex-direction: column; gap: 10px; }
+.acc-box h2 { font-family: 'Black Han Sans', 'Noto Sans KR', sans-serif; font-size: 26px; }
+.acc-box form, #acc-login-pane { display: flex; flex-direction: column; gap: 10px; }
+.acc-box [hidden], .account[hidden], .acc-user[hidden], .acc-login[hidden] { display: none !important; }
+.acc-desc { color: var(--muted); font-size: 13px; }
+.acc-prov-btn { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 12px; border-radius: 10px; font-weight: 700; font-size: 15px; }
+.acc-prov-btn.google { background: #fff; color: #1f1f1f; }
+.acc-prov-btn.kakao { background: #FEE500; color: #191919; }
+.acc-ico { font-weight: 900; }
+.acc-prov-btn.google .acc-ico { color: #4285F4; }
+.acc-cancel { padding: 9px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 14px; }
+.acc-box input { padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.06); color: var(--text); font-size: 16px; }
+.acc-row { display: flex; gap: 8px; }
+.acc-row > * { flex: 1; }
+.acc-save { padding: 10px; border-radius: 10px; background: var(--accent); color: #102; font-weight: 900; }
+.acc-status { font-size: 13px; color: var(--muted); min-height: 18px; }
+.acc-status.err { color: var(--danger); }
 /* 연습 모드: 키커 연습 / 키퍼 연습 고르기 */
 .practice-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .practice-panel button { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 12px 14px; border-radius: 12px;
